@@ -282,7 +282,7 @@ def calculate_snr(signal, noise):
     return snr
 
 def get_signal(df, session_id, smooth_poly = 4, session_zscored = True,plot = True, save_plots = False,snr_threshold=5,
-               output_dir = 'D:\python_analysis\git_repos\vis_detect_analysis_Apr2023\photom_plots'):
+               output_dir = os.getcwd() + '/photom_plots'):
     
     clean_signal_df = pd.DataFrame()
 
