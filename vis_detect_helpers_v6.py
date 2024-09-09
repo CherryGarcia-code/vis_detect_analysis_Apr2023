@@ -36,7 +36,20 @@ def load_pickle(file_path):
         preprocessed_data  =  pickle.load(file)
     return preprocessed_data
 
-def get_session_files(mouse_dir, timestamp=False):
+def find_folder(mouse):
+    """Recursively search for a folder in the given drive and find the drive where the folder is located."""
+    system_drive = os.getenv("SystemDrive") + '\\' # Get the drive letter of the local disk (system drive) on Windows.
+    for root, dirs, files in os.walk(system_drive):
+        if mouse in dirs:
+            mouse_dir = os.path.join(root, mouse) + '\\'
+            cohort = os.path.basename(root)
+            return mouse_dir, cohort
+
+def get_session_files(mouse, cohort_dir=False, timestamp=False,):
+    if cohort_dir:
+        mouse_dir = os.path.join(cohort_dir, mouse) + '\\'
+    else:
+        mouse_dir, _ = find_folder(mouse)
     # Glob all session settings and trials files in the directory
     session_settings_files = glob(os.path.join(mouse_dir, '*__session_settings.json'))
     trials_files = glob(os.path.join(mouse_dir, '*__trials.json'))
@@ -150,50 +163,58 @@ def extractTrialsData (trials_data):
 
 
 
-def process_session_data(session_settings_files, trials_files):
-    # Example for one session
-    print('******************   NEW   SESSION   ******************')
+def process_session_data(session_settings_files, trials_files, cohort_dir=False):
+    session_data_df = pd.DataFrame()
+    for i in range(len(trials_files)):
+        # Example for one session
+        print('******************   NEW   SESSION   ******************')
 
-    session_settings = load_json_data(session_settings_files[0])
-    trials_data = load_json_data(trials_files[0])
-   
-    # Extract the base file name without the directory
-    base_filename = os.path.basename(session_settings_files[0])
-
+        session_settings = load_json_data(session_settings_files[i])
+        trials_data = load_json_data(trials_files[i])
     
-    
-    mouse_id, session_date,  session_time,  session_timestamp, auto_rewd, punishment, protocol = extractSessionMetadata(session_settings, base_filename)
-    iti_values, reaction_times, reaction_times_from_reference_start, outcomes, change_times, change_sizes_TF, TF_vectors = extractTrialsData(trials_data)
-    
-    print('mouse_id is: ',mouse_id)
-    print('session_date is: ', session_date)
-    print('session_time is: ', session_time)
-    print('session timestamp is: ',session_timestamp)
-    print('len iti_values:', len(iti_values))
-    print('auto rewd is: ',auto_rewd)
-    print('punishment is: ',punishment)
-    print('protocol is: ',protocol)
-    print('unique outcomes are: ',np.unique(outcomes))
- 
+        # Extract the base file name without the directory
+        base_filename = os.path.basename(session_settings_files[i])
 
-    processed_data = {
-        'mouse_id': mouse_id,
-        'session_date': session_date,
-        'session_time': session_time,
-        'session_timestamp': session_timestamp,
-        'auto_rewd': auto_rewd,
-        'punishment': punishment,
-        'protocol': protocol,
-        'iti_values': iti_values,
-        'change_times': change_times,
-        'change_sizes_TF': change_sizes_TF,
-        'outcomes': outcomes,
-        'reaction_times': reaction_times,
-        'reaction_times_from_reference_start': reaction_times_from_reference_start,
-        'TF_vectors': TF_vectors                
-    }
+        
+        mouse_id, session_date,  session_time,  session_timestamp, auto_rewd, punishment, protocol = extractSessionMetadata(session_settings, base_filename)
+        iti_values, reaction_times, reaction_times_from_reference_start, outcomes, change_times, change_sizes_TF, TF_vectors = extractTrialsData(trials_data)
+        if cohort_dir:
+            cohort = os.path.basename(cohort_dir)
+        else:
+            _, cohort = find_folder('BG_' + mouse_id)
 
-    session_data_df = pd.DataFrame(processed_data)
+        
+        print('mouse_id is: ',mouse_id)
+        print('mouse cohort is: ', cohort)
+        print('session_date is: ', session_date)
+        print('session_time is: ', session_time)
+        print('session timestamp is: ',session_timestamp)
+        print('len iti_values:', len(iti_values))
+        print('auto rewd is: ',auto_rewd)
+        print('punishment is: ',punishment)
+        print('protocol is: ',protocol)
+        print('unique outcomes are: ',np.unique(outcomes))
+    
+
+        processed_data = {
+            'mouse_id': mouse_id,
+            'cohort': cohort,
+            'session_date': session_date,
+            'session_time': session_time,
+            'session_timestamp': session_timestamp,
+            'auto_rewd': auto_rewd,
+            'punishment': punishment,
+            'protocol': protocol,
+            'iti_values': iti_values,
+            'change_times': change_times,
+            'change_sizes_TF': change_sizes_TF,
+            'outcomes': outcomes,
+            'reaction_times': reaction_times,
+            'reaction_times_from_reference_start': reaction_times_from_reference_start,
+            'TF_vectors': TF_vectors                
+        }
+
+        session_data_df = pd.concat([session_data_df, pd.DataFrame(processed_data)])
     return session_data_df
 
 
@@ -282,7 +303,7 @@ def calculate_snr(signal, noise):
     return snr
 
 def get_signal(df, session_id, smooth_poly = 4, session_zscored = True,plot = True, save_plots = False,snr_threshold=5,
-               output_dir = 'D:\python_analysis\git_repos\vis_detect_analysis_Apr2023\photom_plots'):
+               output_dir = os.getcwd() + '/photom_plots'):
     
     clean_signal_df = pd.DataFrame()
 
