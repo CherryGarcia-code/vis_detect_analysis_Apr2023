@@ -512,6 +512,7 @@ intersect_chr2/
 # python figure outputs:
 png_output/
 pdf_output/
+FIGURES/
 
 # archive files:
 archive/

@@ -3,6 +3,88 @@ import numpy as np
 from scipy.stats import norm
 from typing import List, Dict, Optional, Tuple
 
+def extract_peth(signal: np.ndarray, timestamps: np.ndarray, event_times: np.ndarray, 
+                 window: Tuple[float, float] = (-2.0, 4.0), fs: float = 100.0,
+                 baseline_window: Optional[Tuple[float, float]] = None) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Extract Peri-Event Time Histogram (PETH) matrix.
+    
+    Args:
+        signal: 1D array of continuous signal.
+        timestamps: 1D array of timestamps corresponding to signal.
+        event_times: 1D array of event timestamps to align to.
+        window: (start, end) relative to event in seconds.
+        fs: Sampling frequency (approximate) for output time vector.
+        baseline_window: (start, end) relative to event for trial-based z-scoring.
+                         If provided, each trial is z-scored relative to this window.
+    
+    Returns:
+        time_axis: 1D array of relative time points.
+        peth_matrix: 2D array (n_events x n_timepoints) of aligned signal.
+    """
+    # Create relative time axis
+    n_samples = int((window[1] - window[0]) * fs)
+    time_axis = np.linspace(window[0], window[1], n_samples)
+    
+    peth_matrix = []
+    
+    # Interpolation is safer than index slicing for non-uniform or jittered timestamps
+    # But for speed with uniform sampling, index slicing is better.
+    # Let's assume uniform sampling for now, or use searchsorted.
+    
+    # Using searchsorted for nearest neighbor
+    dt = 1.0 / fs
+    
+    # Pre-calculate baseline mask if needed
+    baseline_mask = None
+    if baseline_window is not None:
+        baseline_mask = (time_axis >= baseline_window[0]) & (time_axis <= baseline_window[1])
+    
+    for et in event_times:
+        if np.isnan(et):
+            peth_matrix.append(np.full(n_samples, np.nan))
+            continue
+            
+        # Define target times for this event
+        target_times = et + time_axis
+        
+        # Find indices (nearest)
+        # This assumes timestamps are sorted
+        idx = np.searchsorted(timestamps, target_times)
+        
+        # Clip indices
+        idx = np.clip(idx, 0, len(signal) - 1)
+        
+        # Extract values
+        # Check if the found timestamp is actually close (within 1/fs)
+        # If not, fill with NaN (gap in recording)
+        found_times = timestamps[idx]
+        valid_mask = np.abs(found_times - target_times) < (1.5 * dt)
+        
+        vals = signal[idx].astype(float)
+        vals[~valid_mask] = np.nan
+        
+        # Apply trial-based z-scoring if requested
+        if baseline_mask is not None:
+            baseline_vals = vals[baseline_mask]
+            # Check if we have enough valid data points in baseline
+            if np.sum(~np.isnan(baseline_vals)) > 1:
+                b_mean = np.nanmean(baseline_vals)
+                b_std = np.nanstd(baseline_vals)
+                if b_std != 0:
+                    vals = (vals - b_mean) / b_std
+                else:
+                    # If std is 0 (flat line), just subtract mean (center at 0)
+                    vals = vals - b_mean
+            else:
+                # Not enough baseline data, fill with NaNs or keep as is?
+                # Usually safer to fill with NaNs if we can't normalize properly
+                vals[:] = np.nan
+
+        peth_matrix.append(vals)
+        
+    return time_axis, np.array(peth_matrix)
+
 def compute_peak_zdf_over_window(df: pd.DataFrame, roi_cols: List[str], start_s: float, end_s: float) -> Dict[str, float]:
     """
     Given a trial-aligned window dataframe (index is seconds relative to event),

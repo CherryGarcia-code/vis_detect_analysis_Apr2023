@@ -1,3 +1,19 @@
+"""
+Behavioral Metrics Calculator.
+
+This script calculates behavioral performance metrics (d-prime, hit rates, false alarm rates) 
+from raw session data.
+
+Usage:
+    python -m scripts.behavior_metrics <mouse_dir> [--out <out_csv>]
+
+Arguments:
+    mouse_dir   : Path to the directory containing mouse session data.
+    --out       : Path to the output CSV file for behavioral metrics.
+
+Example:
+    python -m scripts.behavior_metrics photom_data --out behavior_summary.csv
+"""
 import os
 import argparse
 from typing import Dict, List, Optional, Tuple

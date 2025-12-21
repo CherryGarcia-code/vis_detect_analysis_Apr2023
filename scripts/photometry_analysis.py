@@ -1,3 +1,20 @@
+"""
+(Legacy) Photometry Analysis Script.
+
+This script processes photometry sessions to generate per-session summaries of peak dF/F 
+responses aligned to behavioral events. It is the predecessor to the `run_session_batch.py` pipeline.
+
+Usage:
+    python -m scripts.photometry_analysis <mouse_dir> [--out <out_dir>] [--limit <N>]
+
+Arguments:
+    mouse_dir   : Path to the directory containing mouse session data.
+    --out       : Output directory for summary CSVs (default: pdf_output).
+    --limit     : Limit the number of sessions to process.
+
+Example:
+    python -m scripts.photometry_analysis photom_data --out pdf_output
+"""
 import argparse
 import json
 import os

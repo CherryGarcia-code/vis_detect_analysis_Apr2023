@@ -1,3 +1,19 @@
+"""
+Photometry Report Generator.
+
+This script generates PDF reports visualizing aggregated session data, including learning curves 
+and region-specific activity patterns.
+
+Usage:
+    python -m scripts.photom_report <summary_csv> [--out <out_pdf>]
+
+Arguments:
+    summary_csv : Path to the aggregate summary CSV file (e.g., all_sessions_manifest.csv).
+    --out       : Path to the output PDF report.
+
+Example:
+    python -m scripts.photom_report pdf_output/all_sessions_manifest.csv --out report.pdf
+"""
 import os
 import argparse
 from datetime import datetime

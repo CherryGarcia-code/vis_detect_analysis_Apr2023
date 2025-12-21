@@ -19,7 +19,11 @@ DATE_IN_PHOTOM_RE = re.compile(r"__(?:photom|photom_IO)_(\d{4}-\d{2}-\d{2})T(\d{
 MOUSE_ID_FROM_BASENAME_RE = re.compile(r"^BG_(\d+)")
 
 def load_csv_data(filepath: str) -> pd.DataFrame:
-    return pd.read_csv(filepath)
+    try:
+        return pd.read_csv(filepath)
+    except Exception:
+        # Fallback to python engine if C engine fails (common with some CSVs)
+        return pd.read_csv(filepath, engine='python')
 
 def load_json_data(filepath: str) -> dict:
     with open(filepath, 'r') as file:

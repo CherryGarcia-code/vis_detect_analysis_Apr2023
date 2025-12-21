@@ -1,3 +1,19 @@
+"""
+Group Analysis for Photometry Data.
+
+This script aggregates session summaries to perform group-level analysis, such as comparing 
+responses across regions (DMS vs VLS) or tracking changes over time.
+
+Usage:
+    python -m scripts.photom_group_analysis <summary_dir> [--out <out_dir>]
+
+Arguments:
+    summary_dir : Directory containing session summary CSVs (e.g., output of photometry_analysis).
+    --out       : Output directory for group analysis results.
+
+Example:
+    python -m scripts.photom_group_analysis pdf_output --out group_analysis_results
+"""
 import os
 import argparse
 from typing import Dict, List, Optional, Tuple
