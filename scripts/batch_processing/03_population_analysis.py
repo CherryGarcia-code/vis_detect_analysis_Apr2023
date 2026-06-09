@@ -19,8 +19,9 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 def main():
     parser = argparse.ArgumentParser(description="Population analysis.")
-    parser.add_argument("--input_dir", type=str, default="E:/python_analysis/git_repos/vis_detect_analysis_Apr2023/FIGURES/batch_output", help="Directory containing session summaries.")
-    parser.add_argument("--output_dir", type=str, default="E:/python_analysis/git_repos/vis_detect_analysis_Apr2023/FIGURES/population", help="Directory to save population plots.")
+    _repo_root = Path(__file__).resolve().parents[2]
+    parser.add_argument("--input_dir", type=str, default=str(_repo_root / "FIGURES" / "batch_output"), help="Directory containing session summaries.")
+    parser.add_argument("--output_dir", type=str, default=str(_repo_root / "FIGURES" / "population"), help="Directory to save population plots.")
     
     args = parser.parse_args()
     

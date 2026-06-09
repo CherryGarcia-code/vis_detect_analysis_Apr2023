@@ -27,10 +27,37 @@ sys.path.append(str(Path(__file__).resolve().parents[2] / "src"))
 from visdetect_photom.core import io, session
 from visdetect_photom.analysis import preprocessing, statistics
 from visdetect_photom.viz import plotting
+import re
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
-def process_session(session_files: dict, output_dir: Path):
+def load_subject_metadata(file_path):
+    """Parses the mouse_genotypes_and_procedeures.txt file."""
+    metadata = {}
+    # Regex to capture: Subject, Genotype, Sex, Notes (in quotes), Region (until semicolon)
+    # Example: BG_016 A2a male 'LL ' , DMS;
+    pattern = re.compile(r"^(BG_\d+)\s+([A-Za-z0-9]+)\s+(male|female)\s+(?:'([^']*)')?\s*,?\s*([^;]+)")
+    
+    try:
+        with open(file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or not line.startswith("BG_"):
+                    continue
+                match = pattern.match(line)
+                if match:
+                    subject_id, genotype, sex, notes, region = match.groups()
+                    metadata[subject_id] = {
+                        "Genotype": genotype,
+                        "Sex": sex,
+                        "Notes": notes.strip() if notes else "",
+                        "Region": region.strip()
+                    }
+    except Exception as e:
+        logging.warning(f"Failed to load metadata file: {e}")
+    return metadata
+
+def process_session(session_files: dict, output_dir: Path, subject_metadata: dict = None):
     """
     Process a single session.
     
@@ -52,6 +79,13 @@ def process_session(session_files: dict, output_dir: Path):
         session_out_dir = output_dir / subject_folder / sess.session_id
         session_out_dir.mkdir(parents=True, exist_ok=True)
         
+        # Dynamic ROI Detection
+        available_rois = sorted([k for k in sess.photometry_data.keys() if k.startswith('G')])
+        if not available_rois:
+            available_rois = []
+        num_rois = len(available_rois) if available_rois else 1
+        figsize_width = 6 * num_rois
+        
         # 2. Analysis Pipeline
         
         # A. Compute dF/F (Z-score)
@@ -64,7 +98,10 @@ def process_session(session_files: dict, output_dir: Path):
         
         # Extract event times (Use ABSOLUTE timestamps for alignment with photometry)
         # Hit Times: Use absolute_reaction_time (Time of Lick)
-        hit_times = [t.absolute_reaction_time for t in sess.trials if t.outcome == 'Hit' and t.absolute_reaction_time is not None]
+        # Sort by Reaction Time (Fastest to Slowest)
+        hits = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_reaction_time is not None]
+        hits.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        hit_times = [t.absolute_reaction_time for t in hits]
         
         # Miss Times: Use absolute_change_time (Time of Stimulus Change)
         miss_times = [t.absolute_change_time for t in sess.trials if t.outcome == 'Miss' and t.absolute_change_time is not None]
@@ -73,22 +110,22 @@ def process_session(session_files: dict, output_dir: Path):
         small_sizes = [1.25, 1.35]
         big_sizes = [1.5, 2, 4]
         
-        hit_times_small = [t.absolute_reaction_time for t in sess.trials 
-                           if t.outcome == 'Hit' and t.absolute_reaction_time is not None 
-                           and t.change_size in small_sizes]
+        hits_small = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_reaction_time is not None and t.change_size in small_sizes]
+        hits_small.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        hit_times_small = [t.absolute_reaction_time for t in hits_small]
         
-        hit_times_big = [t.absolute_reaction_time for t in sess.trials 
-                         if t.outcome == 'Hit' and t.absolute_reaction_time is not None 
-                         and t.change_size in big_sizes]
+        hits_big = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_reaction_time is not None and t.change_size in big_sizes]
+        hits_big.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        hit_times_big = [t.absolute_reaction_time for t in hits_big]
 
         # Change Onset (Hit + Miss) - Aligned to Stimulus Change
-        change_times_small = [t.absolute_change_time for t in sess.trials 
-                              if t.outcome in ['Hit', 'Miss'] and t.absolute_change_time is not None 
-                              and t.change_size in small_sizes]
+        changes_small = [t for t in sess.trials if t.outcome in ['Hit', 'Miss'] and t.absolute_change_time is not None and t.change_size in small_sizes]
+        changes_small.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        change_times_small = [t.absolute_change_time for t in changes_small]
         
-        change_times_big = [t.absolute_change_time for t in sess.trials 
-                            if t.outcome in ['Hit', 'Miss'] and t.absolute_change_time is not None 
-                            and t.change_size in big_sizes]
+        changes_big = [t for t in sess.trials if t.outcome in ['Hit', 'Miss'] and t.absolute_change_time is not None and t.change_size in big_sizes]
+        changes_big.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        change_times_big = [t.absolute_change_time for t in changes_big]
 
         # Baseline Onset (Start of Stimulus = Input0 = absolute_start_time + iti_duration)
         def get_baseline_onset(t):
@@ -96,30 +133,31 @@ def process_session(session_files: dict, output_dir: Path):
                 return t.absolute_start_time + t.iti_duration
             return None
 
-        baseline_hit = [get_baseline_onset(t) for t in sess.trials if t.outcome == 'Hit' and get_baseline_onset(t) is not None]
+        base_hits = [t for t in sess.trials if t.outcome == 'Hit' and get_baseline_onset(t) is not None]
+        base_hits.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        baseline_hit = [get_baseline_onset(t) for t in base_hits]
+
         baseline_miss = [get_baseline_onset(t) for t in sess.trials if t.outcome == 'Miss' and get_baseline_onset(t) is not None]
         
         # Filter FA and Abort baselines: only include trials where reaction time > 1s
-        baseline_fa = [get_baseline_onset(t) for t in sess.trials 
-                       if t.outcome == 'FA' and get_baseline_onset(t) is not None 
-                       and t.reaction_time is not None and t.reaction_time > 1.0]
+        base_fas = [t for t in sess.trials if t.outcome == 'FA' and get_baseline_onset(t) is not None and t.reaction_time is not None and t.reaction_time > 1.0]
+        base_fas.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        baseline_fa = [get_baseline_onset(t) for t in base_fas]
         
-        baseline_fa_early = [get_baseline_onset(t) for t in sess.trials 
-                       if t.outcome == 'FA' and get_baseline_onset(t) is not None 
-                       and t.reaction_time is not None and t.reaction_time > 1.0 and t.reaction_time <= 3.0]
+        base_fas_early = [t for t in sess.trials if t.outcome == 'FA' and get_baseline_onset(t) is not None and t.reaction_time is not None and t.reaction_time > 1.0 and t.reaction_time <= 3.0]
+        base_fas_early.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        baseline_fa_early = [get_baseline_onset(t) for t in base_fas_early]
 
-        baseline_fa_late = [get_baseline_onset(t) for t in sess.trials 
-                       if t.outcome == 'FA' and get_baseline_onset(t) is not None 
-                       and t.reaction_time is not None and t.reaction_time > 1.0 and t.reaction_time > 3.0]
+        base_fas_late = [t for t in sess.trials if t.outcome == 'FA' and get_baseline_onset(t) is not None and t.reaction_time is not None and t.reaction_time > 1.0 and t.reaction_time > 3.0]
+        base_fas_late.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        baseline_fa_late = [get_baseline_onset(t) for t in base_fas_late]
         
         baseline_abort = [get_baseline_onset(t) for t in sess.trials 
                           if t.outcome == 'Abort' and get_baseline_onset(t) is not None 
                           and t.reaction_time is not None and t.reaction_time > 1.0]
 
         # FA times: Use absolute reaction time if available, else try to calculate
-        fa_times = []
-        fa_times_early = []
-        fa_times_late = []
+        fa_trials = [] # Store (time, rt) tuples
         
         for t in sess.trials:
             if t.outcome == 'FA':
@@ -131,12 +169,20 @@ def process_session(session_files: dict, output_dir: Path):
                     abs_time = t.absolute_start_time + rt
                 
                 if abs_time is not None:
-                    fa_times.append(abs_time)
-                    if rt is not None:
-                        if rt <= 3.0:
-                            fa_times_early.append(abs_time)
-                        else:
-                            fa_times_late.append(abs_time)
+                    fa_trials.append((abs_time, rt if rt is not None else float('inf')))
+        
+        # Sort by RT
+        fa_trials.sort(key=lambda x: x[1])
+        fa_times = [x[0] for x in fa_trials]
+        
+        # Split FAs by Reaction Time (Early <= 3s, Late > 3s)
+        # Re-filter from sorted fa_trials or re-extract?
+        # Let's re-extract to be safe and consistent with logic
+        fa_trials_early = [x for x in fa_trials if x[1] <= 3.0]
+        fa_times_early = [x[0] for x in fa_trials_early]
+        
+        fa_trials_late = [x for x in fa_trials if x[1] > 3.0]
+        fa_times_late = [x[0] for x in fa_trials_late]
 
         # Abort times: Use absolute reaction time (time of abort)
         abort_times = []
@@ -148,16 +194,18 @@ def process_session(session_files: dict, output_dir: Path):
                     abort_times.append(t.absolute_start_time + t.reaction_time)
         
         # Split Change Times by Outcome for Comparison
-        change_times_small_hit = [t.absolute_change_time for t in sess.trials 
-                                  if t.outcome == 'Hit' and t.absolute_change_time is not None 
-                                  and t.change_size in small_sizes]
+        changes_small_hit = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_change_time is not None and t.change_size in small_sizes]
+        changes_small_hit.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        change_times_small_hit = [t.absolute_change_time for t in changes_small_hit]
+
         change_times_small_miss = [t.absolute_change_time for t in sess.trials 
                                    if t.outcome == 'Miss' and t.absolute_change_time is not None 
                                    and t.change_size in small_sizes]
         
-        change_times_big_hit = [t.absolute_change_time for t in sess.trials 
-                                if t.outcome == 'Hit' and t.absolute_change_time is not None 
-                                and t.change_size in big_sizes]
+        changes_big_hit = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_change_time is not None and t.change_size in big_sizes]
+        changes_big_hit.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+        change_times_big_hit = [t.absolute_change_time for t in changes_big_hit]
+
         change_times_big_miss = [t.absolute_change_time for t in sess.trials 
                                  if t.outcome == 'Miss' and t.absolute_change_time is not None 
                                  and t.change_size in big_sizes]
@@ -205,16 +253,15 @@ def process_session(session_files: dict, output_dir: Path):
             (baseline_fa, "Baseline_FA", "red"),
             (baseline_abort, "Baseline_Abort", "darkgrey")
         ]
-
-        # 1. Plot Individual Events (Trace + Heatmap)
         for times, event_name, color in events:
             if len(times) == 0:
                 continue
-                
-            # --- Trace Plot (Side-by-Side) ---
-            fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+
+            # --- Trace Plot (Multi-ROI) ---
+            fig, axes = plt.subplots(1, num_rois, figsize=(figsize_width, 5), sharey=True)
+            if num_rois == 1: axes = [axes]
             
-            for i, roi_key in enumerate(['G0', 'G2']):
+            for i, roi_key in enumerate(available_rois):
                 ax = axes[i]
                 if roi_key in sess.photometry_data:
                     trace = sess.photometry_data[roi_key]
@@ -237,7 +284,7 @@ def process_session(session_files: dict, output_dir: Path):
                     if i == 0:
                         ax.set_ylabel("Z-Score")
                     
-                    if i == 1:
+                    if i == num_rois - 1:
                         ax.legend(loc='upper right')
                 else:
                     ax.axis('off')
@@ -246,11 +293,12 @@ def process_session(session_files: dict, output_dir: Path):
             plt.savefig(session_out_dir / f"Trace_{event_name}.png")
             plt.close()
 
-            # --- Heatmap Plot (Side-by-Side) ---
-            fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=False)
+            # --- Heatmap Plot (Multi-ROI) ---
+            fig, axes = plt.subplots(1, num_rois, figsize=(figsize_width, 6), sharey=False)
+            if num_rois == 1: axes = [axes]
             
             peths = {}
-            for roi_key in ['G0', 'G2']:
+            for roi_key in available_rois:
                 if roi_key in sess.photometry_data:
                     trace = sess.photometry_data[roi_key]
                     if len(trace.signal) > 0:
@@ -259,12 +307,22 @@ def process_session(session_files: dict, output_dir: Path):
                         peths[roi_key] = peth
             
             if peths:
-                all_vals = np.concatenate([p.flatten() for p in peths.values()])
-                max_val = np.nanmax(np.abs(all_vals)) if len(all_vals) > 0 else 1
-                vmin, vmax = -max_val, max_val
+                # Set color limits based on event type
+                if "FA" in event_name:
+                    vmin, vmax = -10, 10
+                elif "Hit" in event_name:
+                    vmin, vmax = -5, 5
+                elif "Miss" in event_name:
+                    vmin, vmax = -5, 5
+                elif "Change" in event_name:
+                    vmin, vmax = -5, 5
+                else:
+                    all_vals = np.concatenate([p.flatten() for p in peths.values()])
+                    max_val = np.nanmax(np.abs(all_vals)) if len(all_vals) > 0 else 1
+                    vmin, vmax = -max_val, max_val
 
                 im = None
-                for i, roi_key in enumerate(['G0', 'G2']):
+                for i, roi_key in enumerate(available_rois):
                     ax = axes[i]
                     if roi_key in peths:
                         peth = peths[roi_key]
@@ -280,13 +338,14 @@ def process_session(session_files: dict, output_dir: Path):
                         ax.axis('off')
 
                 if im:
-                    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), label='Z-Score')
+                    cbar = fig.colorbar(im, ax=axes if isinstance(axes, (list, np.ndarray)) else [axes], label='Z-Score')
                 
                 plt.savefig(session_out_dir / f"Heatmap_{event_name}.png")
                 plt.close()
 
         # 2. Combined Baseline Plot (Side-by-Side)
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+        fig, axes = plt.subplots(1, num_rois, figsize=(figsize_width, 5), sharey=True)
+        if num_rois == 1: axes = [axes]
         
         baselines_to_plot = [
             (baseline_hit, "Hit", "green"),
@@ -296,7 +355,7 @@ def process_session(session_files: dict, output_dir: Path):
         ]
         
         has_data = False
-        for i, roi_key in enumerate(['G0', 'G2']):
+        for i, roi_key in enumerate(available_rois):
             ax = axes[i]
             if roi_key in sess.photometry_data:
                 trace = sess.photometry_data[roi_key]
@@ -323,7 +382,7 @@ def process_session(session_files: dict, output_dir: Path):
                 if i == 0:
                     ax.set_ylabel("Z-Score")
                 
-                if i == 1:
+                if i == num_rois - 1:
                     ax.legend(loc='upper right')
             else:
                 ax.axis('off')
@@ -340,9 +399,10 @@ def process_session(session_files: dict, output_dir: Path):
         ]
 
         for comp_name, hit_t, miss_t in change_comparisons:
-            fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+            fig, axes = plt.subplots(1, num_rois, figsize=(figsize_width, 5), sharey=True)
+            if num_rois == 1: axes = [axes]
             
-            for i, roi_key in enumerate(['G0', 'G2']):
+            for i, roi_key in enumerate(available_rois):
                 ax = axes[i]
                 if roi_key in sess.photometry_data:
                     trace = sess.photometry_data[roi_key]
@@ -373,7 +433,7 @@ def process_session(session_files: dict, output_dir: Path):
                     ax.set_xlabel("Time from Change (s)")
                     if i == 0:
                         ax.set_ylabel("Z-Score")
-                    if i == 1:
+                    if i == num_rois - 1:
                         ax.legend(loc='upper right')
                 else:
                     ax.axis('off')
@@ -383,9 +443,10 @@ def process_session(session_files: dict, output_dir: Path):
             plt.close()
 
         # 4. Baseline FA Comparison (Early vs Late)
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+        fig, axes = plt.subplots(1, num_rois, figsize=(figsize_width, 5), sharey=True)
+        if num_rois == 1: axes = [axes]
         
-        for i, roi_key in enumerate(['G0', 'G2']):
+        for i, roi_key in enumerate(available_rois):
             ax = axes[i]
             if roi_key in sess.photometry_data:
                 trace = sess.photometry_data[roi_key]
@@ -416,7 +477,7 @@ def process_session(session_files: dict, output_dir: Path):
                 ax.set_xlabel("Time from Stimulus Onset (s)")
                 if i == 0:
                     ax.set_ylabel("Z-Score")
-                if i == 1:
+                if i == num_rois - 1:
                     ax.legend(loc='upper right')
             else:
                 ax.axis('off')
@@ -426,9 +487,10 @@ def process_session(session_files: dict, output_dir: Path):
         plt.close()
 
         # 5. FA Response Comparison (Early vs Late)
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+        fig, axes = plt.subplots(1, num_rois, figsize=(figsize_width, 5), sharey=True)
+        if num_rois == 1: axes = [axes]
         
-        for i, roi_key in enumerate(['G0', 'G2']):
+        for i, roi_key in enumerate(available_rois):
             ax = axes[i]
             if roi_key in sess.photometry_data:
                 trace = sess.photometry_data[roi_key]
@@ -459,13 +521,67 @@ def process_session(session_files: dict, output_dir: Path):
                 ax.set_xlabel("Time from Lick (s)")
                 if i == 0:
                     ax.set_ylabel("Z-Score")
-                if i == 1:
+                if i == num_rois - 1:
                     ax.legend(loc='upper right')
             else:
                 ax.axis('off')
         
         plt.tight_layout()
         plt.savefig(session_out_dir / "FA_Response_Comparison.png")
+        plt.close()
+
+        # 6. Outcome comparison (Late FA vs Hit Big vs Hit Small) with modified baseline
+        fig, axes = plt.subplots(1, num_rois, figsize=(figsize_width, 5), sharey=True)
+        if num_rois == 1: axes = [axes]
+
+        for i, roi_key in enumerate(available_rois):
+            ax = axes[i]
+            if roi_key in sess.photometry_data:
+                trace = sess.photometry_data[roi_key]
+                if len(trace.signal) == 0:
+                    ax.axis('off')
+                    continue
+                
+                # Late FA
+                if len(fa_times_late) > 0:
+                    time_axis, peth = statistics.extract_peth(trace.signal, trace.timestamps, fa_times_late, 
+                                                              window=(-2, 4), baseline_window=(-2, -1.5))
+                    mean_trace = np.nanmean(peth, axis=0)
+                    sem_trace = np.nanstd(peth, axis=0) / np.sqrt(peth.shape[0])
+                    ax.plot(time_axis, mean_trace, color='darkred', label=f"Late FA (n={len(fa_times_late)})", linewidth=2)
+                    ax.fill_between(time_axis, mean_trace-sem_trace, mean_trace+sem_trace, alpha=0.1, color='darkred')
+                
+                # Hit Big
+                if len(hit_times_big) > 0:
+                    time_axis, peth = statistics.extract_peth(trace.signal, trace.timestamps, hit_times_big, 
+                                                              window=(-2, 4), baseline_window=(-2, -1.5))
+                    mean_trace = np.nanmean(peth, axis=0)
+                    sem_trace = np.nanstd(peth, axis=0) / np.sqrt(peth.shape[0])
+                    ax.plot(time_axis, mean_trace, color='darkgreen', label=f"Hit Big (n={len(hit_times_big)})", linewidth=2)
+                    ax.fill_between(time_axis, mean_trace-sem_trace, mean_trace+sem_trace, alpha=0.1, color='darkgreen')
+
+                # Hit Small
+                if len(hit_times_small) > 0:
+                    time_axis, peth = statistics.extract_peth(trace.signal, trace.timestamps, hit_times_small, 
+                                                              window=(-2, 4), baseline_window=(-2, -1.5))
+                    mean_trace = np.nanmean(peth, axis=0)
+                    sem_trace = np.nanstd(peth, axis=0) / np.sqrt(peth.shape[0])
+                    ax.plot(time_axis, mean_trace, color='limegreen', label=f"Hit Small (n={len(hit_times_small)})", linewidth=2)
+                    ax.fill_between(time_axis, mean_trace-sem_trace, mean_trace+sem_trace, alpha=0.1, color='limegreen')
+
+                ax.axvline(0, linestyle='--', color='k', alpha=0.7)
+                ax.set_title(f"{roi_key} - Outcome Comparison")
+                ax.set_xlabel("Time from Event (s)")
+                if i == 0:
+                    ax.set_ylabel("Z-Score (Base: -2 to -1.5s)")
+                
+                if i == num_rois - 1:
+                    ax.legend(loc='upper right')
+            else:
+                ax.axis('off')
+        
+        plt.tight_layout()
+        plt.savefig(session_out_dir / "Outcome_Comparison.png")
         plt.close()
 
         # 3. Save Summary Stats
@@ -488,6 +604,12 @@ def process_session(session_files: dict, output_dir: Path):
             "hit_rate": n_hits / (n_hits + n_misses) if (n_hits + n_misses) > 0 else 0,
             "n_traces": len(sess.photometry_data)
         }
+        
+        # Inject Subject Metadata
+        if subject_metadata and sess.subject_id in subject_metadata:
+            meta = subject_metadata[sess.subject_id]
+            summary_data.update(meta)
+            
         pd.DataFrame([summary_data]).to_csv(session_out_dir / "session_summary.csv", index=False)
         
         # logging.info(f"Finished processing {sess.session_id}")
@@ -499,8 +621,10 @@ def process_session(session_files: dict, output_dir: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="Batch process photometry sessions.")
-    parser.add_argument("--root_dir", type=str, default="E:/python_analysis/git_repos/vis_detect_analysis_Apr2023/photom_data", help="Root directory containing session data.")
-    parser.add_argument("--output_dir", type=str, default="E:/python_analysis/git_repos/vis_detect_analysis_Apr2023/FIGURES/batch_output", help="Directory to save outputs.")
+    _repo_root = Path(__file__).resolve().parents[2]
+    parser.add_argument("--root_dir", type=str, default=str(_repo_root / "photom_data"), help="Root directory containing session data.")
+    parser.add_argument("--output_dir", type=str, default=str(_repo_root / "FIGURES" / "batch_output"), help="Directory to save outputs.")
+    parser.add_argument("--manifest", type=str, default=None, help="Path to a manifest CSV to filter sessions (e.g. clean sessions).")
     parser.add_argument("--max_sessions", type=int, default=None, help="Maximum number of sessions to process (for testing).")
     parser.add_argument("--n_workers", type=int, default=4, help="Number of parallel workers.")
     
@@ -510,9 +634,62 @@ def main():
     output_path = Path(args.output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
+    # Load Metadata
+    metadata_file = root_path / "mouse_genotypes_and_procedeures.txt"
+    subject_metadata = {}
+    if metadata_file.exists():
+         logging.info(f"Loading metadata from {metadata_file}")
+         subject_metadata = load_subject_metadata(metadata_file)
+    else:
+         logging.warning(f"Metadata file not found at {metadata_file}")
+
     # Discover sessions
     sessions = io.find_all_sessions(str(root_path), recursive=True)
-    logging.info(f"Found {len(sessions)} sessions.")
+    logging.info(f"Found {len(sessions)} sessions in root dir.")
+    
+    # Filter by Manifest if provided
+    if args.manifest:
+        manifest_path = Path(args.manifest)
+        if manifest_path.exists():
+            logging.info(f"Filtering sessions using manifest: {manifest_path}")
+            df_manifest = pd.read_csv(manifest_path)
+            # Support both 'session_id' and 'session_name'
+            id_col = 'session_id' if 'session_id' in df_manifest.columns else 'session_name'
+            if id_col in df_manifest.columns:
+                valid_ids = set(df_manifest[id_col].astype(str).tolist())
+                # Filter sessions: s['session_id'] or s['session_settings'] stem parsing? 
+                # io.find_all_sessions returns dicts with 'trials', etc.
+                # We need to infer ID from the file path to match.
+                # Usually we rely on session.load_session to get ID, but that's slow.
+                # Let's rely on basic filename matching or try to infer from 'trials' path.
+                
+                filtered_sessions = []
+                for s in sessions:
+                     # Try to guess ID from trials file name: Subject_Date_Time_trials.json
+                     # or Subject_Session_trials.json
+                     trials_path = Path(s.get('trials', ''))
+                     # Try to match against valid_ids
+                     # Heuristic: does any valid ID appear in the filename?
+                     # Or does the filename stem match?
+                     # The most robust way is to check if the session ID string is contained in the filename
+                     # assuming valid_ids are like "BG_021_20240726_120032"
+                     
+                     # Simple check: is any valid_id a substring of the trials filename?
+                     # Optimization: Pre-calculate file stems?
+                     match = False
+                     t_name = trials_path.name
+                     for vid in valid_ids:
+                         if vid in t_name:
+                             filtered_sessions.append(s)
+                             match = True
+                             break
+                
+                logging.info(f"Filtered down to {len(filtered_sessions)} sessions from manifest.")
+                sessions = filtered_sessions
+            else:
+                logging.warning(f"Manifest missing 'session_id' or 'session_name' column. Ignoring filter.")
+        else:
+             logging.warning(f"Manifest file not found: {manifest_path}")
     
     if args.max_sessions:
         sessions = sessions[:args.max_sessions]
@@ -521,7 +698,7 @@ def main():
     # Parallel processing with tqdm
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.n_workers) as executor:
         # Submit all tasks
-        futures = [executor.submit(process_session, sess_files, output_path) for sess_files in sessions]
+        futures = [executor.submit(process_session, sess_files, output_path, subject_metadata) for sess_files in sessions]
         
         # Iterate over completed futures with progress bar
         for _ in tqdm(concurrent.futures.as_completed(futures), total=len(sessions), desc="Processing Sessions"):

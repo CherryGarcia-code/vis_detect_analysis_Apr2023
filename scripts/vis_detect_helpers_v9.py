@@ -5,10 +5,8 @@ import os
 import json
 import pickle
 from datetime import datetime
-import statistics
 from scipy.signal import savgol_filter
 import scipy.stats as stats
-import scipy.io
 import matplotlib
 import matplotlib.pyplot as plt
 import re
@@ -498,21 +496,6 @@ def filter_and_pad_data(df, change_sizes, threshold):
     return pd.DataFrame.from_dict(subsetted_sessions, orient='index').transpose()
 
 
-def flatten_nested_df(all_data_df):
-
-    # Step 1: Expand the nested DataFrame structure into a list of DataFrames
-    dataframes_list = []
-    for subject_id, series in all_data_df.items():
-        for session_id, session_df in series.items():
-            if session_df is not None:
-                # Assign new index levels to the session_df for proper concatenation
-                # session_df = session_df.assign(subject_id=subject_id, session_id=session_id)
-                dataframes_list.append(session_df)
-
-    # Step 2: Concatenate these DataFrames into a single DataFrame with a MultiIndex
-    concat_df = pd.concat(dataframes_list)
-    return concat_df
-
 def calculate_snr(signal, noise):
     # Calculate the power of the signal and noise
     signal_power = np.mean(signal ** 2)
@@ -522,7 +505,7 @@ def calculate_snr(signal, noise):
     return snr
 
 def get_signal(df, session_id, smooth_poly = 4, session_zscored = True,plot = True, save_plots = False,snr_threshold=5,
-               output_dir = 'D:\python_analysis\git_repos\vis_detect_analysis_Apr2023\photom_plots'):
+               output_dir = None):
     
     clean_signal_df = pd.DataFrame()
 
@@ -574,8 +557,8 @@ def get_signal(df, session_id, smooth_poly = 4, session_zscored = True,plot = Tr
         # Smoothing the iso and signal data
         # iso_smooth = savgol_filter(iso_fitted, window_length=91, polyorder=smooth_poly)
         # sig_smooth = savgol_filter(sig_data, window_length=41, polyorder=smooth_poly+1)
-        iso_smooth = savgol_filter(iso_fitted, window_length=90, polyorder=smooth_poly-1)
-        sig_smooth = savgol_filter(sig_data, window_length=40, polyorder=smooth_poly-2)
+        iso_smooth = savgol_filter(iso_fitted, window_length=91, polyorder=smooth_poly-1)
+        sig_smooth = savgol_filter(sig_data, window_length=41, polyorder=smooth_poly-2)
 
         # Subtract the iso_smooth from sig_smooth to remove motion artifacts
         sig_smooth_clean = (sig_smooth - iso_smooth)
@@ -603,7 +586,10 @@ def get_signal(df, session_id, smooth_poly = 4, session_zscored = True,plot = Tr
         clean_signal_df[f'{roi}_clean_signal'] = sig_smooth_clean
         clean_signal_df[f'{roi}_clean_signal_dff'] = sig_smooth_clean_dff
         if session_zscored == True:
-            clean_signal_df[f'zscored_{roi}_clean_signal_dff'] = (sig_smooth_clean_dff - sig_smooth_clean_dff.mean())/sig_smooth_clean_dff.std()
+            std = sig_smooth_clean_dff.std()
+            if std < 1e-6:
+                std = 1.0
+            clean_signal_df[f'zscored_{roi}_clean_signal_dff'] = (sig_smooth_clean_dff - sig_smooth_clean_dff.mean()) / std
         # After processing all ROIs
         # if clean_signal_df.empty:
         #     print(f"All ROIs for session {session_id} were discarded due to low SNR.")
@@ -655,7 +641,8 @@ def get_signal(df, session_id, smooth_poly = 4, session_zscored = True,plot = Tr
             plt.tight_layout()
             plt.show()
         
-            if save_plots:
+            if save_plots and output_dir is not None:
+                os.makedirs(output_dir, exist_ok=True)
                 fig.savefig(os.path.join(output_dir, f'{session_id}_{hemisphere}_{region}.png'))
                 
 
@@ -718,9 +705,9 @@ def extract_photom_windows_from_session_s(session_data, behave_event):
     elif behave_event == 'FA':
         # To take all FA trials
         FAs = session_data[session_data['outcomes'] == 'FA']
-        # To make an early FA df without early FAs (under 2 seconds from baseline presentation)
-        early_FAs = FAs[FAs['reaction_times'] <= 2]
-        late_FAs = FAs[~((FAs['outcomes'] == 'FA') & (FAs['reaction_times'] < 2))]
+        # To make an early FA df without early FAs (under 3 seconds from baseline presentation)
+        early_FAs = FAs[FAs['reaction_times'] <= 3.0]
+        late_FAs = FAs[FAs['reaction_times'] > 3.0]
         early_FA_signals = early_FAs.apply(lambda row: extract_signal_window_from_trial_df(row, row['reaction_time_Timestamps']), axis=1).tolist()
         late_FA_signals = late_FAs.apply(lambda row: extract_signal_window_from_trial_df(row, row['reaction_time_Timestamps']), axis=1).tolist()
         early_FA_baseline_signals = early_FAs.apply(lambda row: extract_signal_window_from_trial_df(row, row['baseline_on_timestamps']), axis=1).tolist()

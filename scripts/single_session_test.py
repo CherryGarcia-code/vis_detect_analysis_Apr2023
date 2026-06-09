@@ -70,7 +70,10 @@ def main():
     
     # Events
     # Hit Times: Use absolute_reaction_time (Time of Lick)
-    hit_times = [t.absolute_reaction_time for t in sess.trials if t.outcome == 'Hit' and t.absolute_reaction_time is not None]
+    # Sort by Reaction Time (Fastest to Slowest)
+    hits = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_reaction_time is not None]
+    hits.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    hit_times = [t.absolute_reaction_time for t in hits]
     
     # Miss Times: Use absolute_change_time (Time of Stimulus Change)
     miss_times = [t.absolute_change_time for t in sess.trials if t.outcome == 'Miss' and t.absolute_change_time is not None]
@@ -85,38 +88,40 @@ def main():
     unique_sizes = set(t.change_size for t in sess.trials if t.change_size is not None)
     print(f"Unique change sizes found in session: {unique_sizes}")
     
-    hit_times_small = [t.absolute_reaction_time for t in sess.trials 
-                       if t.outcome == 'Hit' and t.absolute_reaction_time is not None 
-                       and t.change_size in small_sizes]
+    hits_small = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_reaction_time is not None and t.change_size in small_sizes]
+    hits_small.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    hit_times_small = [t.absolute_reaction_time for t in hits_small]
     
-    hit_times_big = [t.absolute_reaction_time for t in sess.trials 
-                     if t.outcome == 'Hit' and t.absolute_reaction_time is not None 
-                     and t.change_size in big_sizes]
+    hits_big = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_reaction_time is not None and t.change_size in big_sizes]
+    hits_big.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    hit_times_big = [t.absolute_reaction_time for t in hits_big]
     
     print(f"Found {len(hit_times)} Hits ({len(hit_times_small)} Small, {len(hit_times_big)} Big)")
 
     # Change Onset (Hit + Miss) - Aligned to Stimulus Change
     # Small: 1.25, 1.35
     # Big: 1.5, 2, 4
-    change_times_small = [t.absolute_change_time for t in sess.trials 
-                          if t.outcome in ['Hit', 'Miss'] and t.absolute_change_time is not None 
-                          and t.change_size in small_sizes]
+    changes_small = [t for t in sess.trials if t.outcome in ['Hit', 'Miss'] and t.absolute_change_time is not None and t.change_size in small_sizes]
+    changes_small.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    change_times_small = [t.absolute_change_time for t in changes_small]
     
-    change_times_big = [t.absolute_change_time for t in sess.trials 
-                        if t.outcome in ['Hit', 'Miss'] and t.absolute_change_time is not None 
-                        and t.change_size in big_sizes]
+    changes_big = [t for t in sess.trials if t.outcome in ['Hit', 'Miss'] and t.absolute_change_time is not None and t.change_size in big_sizes]
+    changes_big.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    change_times_big = [t.absolute_change_time for t in changes_big]
     
     # Split Change Times by Outcome for Comparison
-    change_times_small_hit = [t.absolute_change_time for t in sess.trials 
-                              if t.outcome == 'Hit' and t.absolute_change_time is not None 
-                              and t.change_size in small_sizes]
+    changes_small_hit = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_change_time is not None and t.change_size in small_sizes]
+    changes_small_hit.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    change_times_small_hit = [t.absolute_change_time for t in changes_small_hit]
+
     change_times_small_miss = [t.absolute_change_time for t in sess.trials 
                                if t.outcome == 'Miss' and t.absolute_change_time is not None 
                                and t.change_size in small_sizes]
     
-    change_times_big_hit = [t.absolute_change_time for t in sess.trials 
-                            if t.outcome == 'Hit' and t.absolute_change_time is not None 
-                            and t.change_size in big_sizes]
+    changes_big_hit = [t for t in sess.trials if t.outcome == 'Hit' and t.absolute_change_time is not None and t.change_size in big_sizes]
+    changes_big_hit.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    change_times_big_hit = [t.absolute_change_time for t in changes_big_hit]
+
     change_times_big_miss = [t.absolute_change_time for t in sess.trials 
                              if t.outcome == 'Miss' and t.absolute_change_time is not None 
                              and t.change_size in big_sizes]
@@ -132,37 +137,42 @@ def main():
             return t.absolute_start_time + t.iti_duration
         return None
 
-    baseline_hit = [get_baseline_onset(t) for t in sess.trials if t.outcome == 'Hit' and get_baseline_onset(t) is not None]
+    base_hits = [t for t in sess.trials if t.outcome == 'Hit' and get_baseline_onset(t) is not None]
+    base_hits.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    baseline_hit = [get_baseline_onset(t) for t in base_hits]
+
     baseline_miss = [get_baseline_onset(t) for t in sess.trials if t.outcome == 'Miss' and get_baseline_onset(t) is not None]
     
     # Filter FA and Abort baselines: only include trials where reaction time > 1s
-    baseline_fa = [get_baseline_onset(t) for t in sess.trials 
-                   if t.outcome == 'FA' and get_baseline_onset(t) is not None 
-                   and t.reaction_time is not None and t.reaction_time > 1.0]
+    base_fas = [t for t in sess.trials if t.outcome == 'FA' and get_baseline_onset(t) is not None and t.reaction_time is not None and t.reaction_time > 1.0]
+    base_fas.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    baseline_fa = [get_baseline_onset(t) for t in base_fas]
     
-    baseline_fa_early = [get_baseline_onset(t) for t in sess.trials 
-                   if t.outcome == 'FA' and get_baseline_onset(t) is not None 
-                   and t.reaction_time is not None and t.reaction_time > 1.0 and t.reaction_time <= 3.0]
+    base_fas_early = [t for t in sess.trials if t.outcome == 'FA' and get_baseline_onset(t) is not None and t.reaction_time is not None and t.reaction_time > 1.0 and t.reaction_time <= 3.0]
+    base_fas_early.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    baseline_fa_early = [get_baseline_onset(t) for t in base_fas_early]
 
-    baseline_fa_late = [get_baseline_onset(t) for t in sess.trials 
-                   if t.outcome == 'FA' and get_baseline_onset(t) is not None 
-                   and t.reaction_time is not None and t.reaction_time > 1.0 and t.reaction_time > 3.0]
+    base_fas_late = [t for t in sess.trials if t.outcome == 'FA' and get_baseline_onset(t) is not None and t.reaction_time is not None and t.reaction_time > 1.0 and t.reaction_time > 3.0]
+    base_fas_late.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    baseline_fa_late = [get_baseline_onset(t) for t in base_fas_late]
     
     baseline_abort = [get_baseline_onset(t) for t in sess.trials 
                       if t.outcome == 'Abort' and get_baseline_onset(t) is not None 
                       and t.reaction_time is not None and t.reaction_time > 1.0]
 
     # FA and Abort: Use absolute_reaction_time (time of the lick)
-    fa_times = [t.absolute_reaction_time for t in sess.trials if t.outcome == 'FA' and t.absolute_reaction_time is not None]
+    fas = [t for t in sess.trials if t.outcome == 'FA' and t.absolute_reaction_time is not None]
+    fas.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    fa_times = [t.absolute_reaction_time for t in fas]
     
     # Split FAs by Reaction Time (Early <= 3s, Late > 3s)
-    fa_times_early = [t.absolute_reaction_time for t in sess.trials 
-                      if t.outcome == 'FA' and t.absolute_reaction_time is not None 
-                      and t.reaction_time is not None and t.reaction_time <= 3.0]
+    fas_early = [t for t in sess.trials if t.outcome == 'FA' and t.absolute_reaction_time is not None and t.reaction_time is not None and t.reaction_time <= 3.0]
+    fas_early.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    fa_times_early = [t.absolute_reaction_time for t in fas_early]
     
-    fa_times_late = [t.absolute_reaction_time for t in sess.trials 
-                     if t.outcome == 'FA' and t.absolute_reaction_time is not None 
-                     and t.reaction_time is not None and t.reaction_time > 3.0]
+    fas_late = [t for t in sess.trials if t.outcome == 'FA' and t.absolute_reaction_time is not None and t.reaction_time is not None and t.reaction_time > 3.0]
+    fas_late.sort(key=lambda t: t.reaction_time if t.reaction_time is not None else float('inf'))
+    fa_times_late = [t.absolute_reaction_time for t in fas_late]
     
     abort_times = [t.absolute_reaction_time for t in sess.trials if t.outcome == 'Abort' and t.absolute_reaction_time is not None]
     
@@ -249,9 +259,19 @@ def main():
                 peths[roi_key] = peth
         
         if peths:
-            all_vals = np.concatenate([p.flatten() for p in peths.values()])
-            max_val = np.nanmax(np.abs(all_vals)) if len(all_vals) > 0 else 1
-            vmin, vmax = -max_val, max_val
+            # Set color limits based on event type
+            if "FA" in event_name:
+                vmin, vmax = -10, 10
+            elif "Hit" in event_name:
+                vmin, vmax = -5, 5
+            elif "Miss" in event_name:
+                vmin, vmax = -5, 5
+            elif "Change" in event_name:
+                vmin, vmax = -5, 5
+            else:
+                all_vals = np.concatenate([p.flatten() for p in peths.values()])
+                max_val = np.nanmax(np.abs(all_vals)) if len(all_vals) > 0 else 1
+                vmin, vmax = -max_val, max_val
 
             im = None
             for i, roi_key in enumerate(['G0', 'G2']):
@@ -447,9 +467,6 @@ def main():
     plt.tight_layout()
     plt.savefig(output_dir / "FA_Response_Comparison.png")
     plt.close()
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()
