@@ -89,7 +89,22 @@ def main():
             return
 
     # Load Data
-    df = pd.read_csv(manifest_path)
+    # Detect ID column
+    id_col = 'session_id'
+    
+    # Peek at columns
+    header = pd.read_csv(manifest_path, nrows=0).columns.tolist()
+    if 'session_id' in header:
+        id_col = 'session_id'
+        dtype_dict = {'session_id': str}
+    elif 'session_name' in header:
+        id_col = 'session_name'
+        dtype_dict = {'session_name': str}
+    else:
+        dtype_dict = {}
+
+    df = pd.read_csv(manifest_path, dtype=dtype_dict)
+    
     print(f"Loaded {len(df)} sessions from {manifest_path.name}")
 
     # Load Config
