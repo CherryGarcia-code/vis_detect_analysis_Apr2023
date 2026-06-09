@@ -318,3 +318,93 @@ def extract_onset_latency(trace: np.ndarray, time_axis: np.ndarray,
             count = 0
 
     return np.nan
+
+
+# ── Mode-aware response extraction (C2) ──────────────────────
+
+def _window_segment(trace, time_axis, window):
+    """Return (finite values, their times) inside the window."""
+    trace = np.asarray(trace, dtype=float)
+    time_axis = np.asarray(time_axis, dtype=float)
+    mask = (time_axis >= window[0]) & (time_axis <= window[1])
+    seg = trace[mask]
+    t_seg = time_axis[mask]
+    finite = np.isfinite(seg)
+    return seg[finite], t_seg[finite]
+
+
+def extract_activation(trace, time_axis, window):
+    """Peak positive deflection in window (>0), else nan (pure suppression/flat)."""
+    seg, _ = _window_segment(trace, time_axis, window)
+    if seg.size == 0:
+        return np.nan
+    m = float(np.max(seg))
+    return m if m > 0 else np.nan
+
+
+def extract_suppression(trace, time_axis, window):
+    """Peak negative deflection in window (<0), else nan (pure activation/flat)."""
+    seg, _ = _window_segment(trace, time_axis, window)
+    if seg.size == 0:
+        return np.nan
+    m = float(np.min(seg))
+    return m if m < 0 else np.nan
+
+
+def extract_signed_peak(trace, time_axis, window):
+    """Abs-max deflection in window, preserving sign (captures activation OR suppression)."""
+    seg, _ = _window_segment(trace, time_axis, window)
+    if seg.size == 0:
+        return np.nan
+    return float(seg[np.argmax(np.abs(seg))])
+
+
+def extract_signed_auc(trace, time_axis, window):
+    """Mean (net signed response) over window."""
+    seg, _ = _window_segment(trace, time_axis, window)
+    if seg.size == 0:
+        return np.nan
+    return float(np.mean(seg))
+
+
+def extract_ramp_slope(trace, time_axis, window):
+    """Slope (signal-units/s) of a degree-1 fit over window; offset-invariant."""
+    seg, t_seg = _window_segment(trace, time_axis, window)
+    if seg.size < 2:
+        return np.nan
+    return float(np.polyfit(t_seg, seg, 1)[0])
+
+
+def pushpull_sign_contrast(d1_vals, d2_vals, n_perm=10000, seed=42):
+    """Group-level D1-vs-D2 sign contrast (NOT within-animal anticorrelation).
+
+    Returns per-genotype mean + bootstrap 95% CI, each sign, an `opposite_sign`
+    flag (signs differ AND both CIs exclude 0), permutation p on (meanD1-meanD2),
+    and rank-biserial effect size.
+    """
+    d1 = np.asarray(d1_vals, float); d1 = d1[np.isfinite(d1)]
+    d2 = np.asarray(d2_vals, float); d2 = d2[np.isfinite(d2)]
+    out = {"d1_n": int(d1.size), "d2_n": int(d2.size),
+           "d1_mean": float(np.mean(d1)) if d1.size else np.nan,
+           "d2_mean": float(np.mean(d2)) if d2.size else np.nan}
+
+    d1_ci = bootstrap_ci(d1) if d1.size >= 2 else {"ci_lo": np.nan, "ci_hi": np.nan}
+    d2_ci = bootstrap_ci(d2) if d2.size >= 2 else {"ci_lo": np.nan, "ci_hi": np.nan}
+    out.update({"d1_ci_lo": d1_ci["ci_lo"], "d1_ci_hi": d1_ci["ci_hi"],
+                "d2_ci_lo": d2_ci["ci_lo"], "d2_ci_hi": d2_ci["ci_hi"]})
+
+    def _excl_zero(ci):
+        return np.isfinite(ci["ci_lo"]) and (ci["ci_lo"] > 0 or ci["ci_hi"] < 0)
+
+    out["d1_sign"] = int(np.sign(out["d1_mean"])) if np.isfinite(out["d1_mean"]) else 0
+    out["d2_sign"] = int(np.sign(out["d2_mean"])) if np.isfinite(out["d2_mean"]) else 0
+    out["opposite_sign"] = bool(_excl_zero(d1_ci) and _excl_zero(d2_ci)
+                                and out["d1_sign"] != out["d2_sign"])
+
+    if d1.size >= 2 and d2.size >= 2:
+        out["p"] = permutation_test(d1, d2, n_perm=n_perm, seed=seed)["p"]
+        out["rank_biserial_r"] = mannwhitney_with_effect_size(d1, d2)["rank_biserial_r"]
+    else:
+        out["p"] = np.nan
+        out["rank_biserial_r"] = np.nan
+    return out
