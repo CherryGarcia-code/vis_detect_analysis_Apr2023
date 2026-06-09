@@ -518,3 +518,10 @@ FIGURES/
 archive/
 scripts/previous/
 scripts/scripts_archive/
+
+# generated analysis outputs (regenerable; kept on disk, not tracked):
+results/
+exported_figures/
+*.7z
+photometry_export_matlab.csv
+photometry_export_check_plot.png
