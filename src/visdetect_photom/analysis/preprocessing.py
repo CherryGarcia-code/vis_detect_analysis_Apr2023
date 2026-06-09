@@ -3,6 +3,20 @@ import numpy as np
 from scipy.signal import savgol_filter
 from typing import List, Dict, Tuple, Optional, Union
 
+from visdetect_photom.core.constants import OLD_FORMAT_COLUMN_MAP
+
+
+def _rename_old_format_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename old-format photometry columns (BG_008–011) to standard names.
+
+    Detects the old Neurophotometrics Bonsai export format by checking for
+    'Region0G' column and applies the mapping from OLD_FORMAT_COLUMN_MAP.
+    """
+    if 'Region0G' in df.columns:
+        df = df.rename(columns=OLD_FORMAT_COLUMN_MAP)
+    return df
+
+
 def process_photometry_signals(df: pd.DataFrame, smooth_poly: int = 4, session_zscored: bool = True) -> pd.DataFrame:
     """
     Process raw photometry data: de-interleave, fit isosbestic, smooth, and calculate dF/F.
@@ -18,6 +32,9 @@ def process_photometry_signals(df: pd.DataFrame, smooth_poly: int = 4, session_z
     """
     clean_signal_df = pd.DataFrame()
     data = df.copy()
+
+    # Handle old-format column names (BG_008–011)
+    data = _rename_old_format_columns(data)
     
     # Determine ROIs
     dms_rois = ['G0', 'G2']
@@ -95,8 +112,10 @@ def process_photometry_signals(df: pd.DataFrame, smooth_poly: int = 4, session_z
             sig_smooth_clean = (sig_smooth - iso_smooth)
             sig_smooth_clean_dff = (sig_smooth_clean / iso_smooth)
             
-        # Handle NaNs/Infs
-        sig_smooth_clean_dff = np.nan_to_num(sig_smooth_clean_dff)
+        # Handle NaNs/Infs — use NaN (not 0.0) so dead fibers are visible
+        sig_smooth_clean_dff = np.where(
+            np.isfinite(sig_smooth_clean_dff), sig_smooth_clean_dff, np.nan
+        )
 
         # Baseline correction (min subtraction)
         # NOTE: This was in the original helper, but it might be problematic if we want true dF/F centered around 0.
@@ -129,11 +148,12 @@ def process_photometry_signals(df: pd.DataFrame, smooth_poly: int = 4, session_z
         clean_signal_df[f'{roi}_clean_signal_dff'] = sig_smooth_clean_dff
         
         if session_zscored:
-            std = sig_smooth_clean_dff.std()
-            if std != 0:
-                clean_signal_df[f'zscored_{roi}_clean_signal_dff'] = (sig_smooth_clean_dff - sig_smooth_clean_dff.mean()) / std
+            std = np.nanstd(sig_smooth_clean_dff)
+            if std < 1e-6:
+                # Dead fiber or constant signal — fill with NaN instead of 0
+                clean_signal_df[f'zscored_{roi}_clean_signal_dff'] = np.nan
             else:
-                clean_signal_df[f'zscored_{roi}_clean_signal_dff'] = 0.0
+                clean_signal_df[f'zscored_{roi}_clean_signal_dff'] = (sig_smooth_clean_dff - np.nanmean(sig_smooth_clean_dff)) / std
 
     return clean_signal_df
 

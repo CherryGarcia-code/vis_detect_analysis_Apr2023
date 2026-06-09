@@ -61,6 +61,34 @@ class Session:
     def get_trace(self, roi_name: str) -> Optional[PhotometryTrace]:
         return self.photometry_data.get(roi_name)
 
+def _extract_io_from_embedded_columns(photom_df: pd.DataFrame) -> list:
+    """Extract baseline-onset timestamps from embedded Input0 column.
+
+    Old-format photometry CSVs (BG_008–011) have Input0/Input1 columns
+    with 0/1 values. Baseline onset = rising edge (0→1) of Input0.
+    The timestamp column may be 'Timestamp' (old) or 'SystemTimestamp' (new).
+    """
+    from visdetect_photom.core.constants import OLD_FORMAT_COLUMN_MAP
+
+    # Determine timestamp column name
+    if 'SystemTimestamp' in photom_df.columns:
+        ts_col = 'SystemTimestamp'
+    elif 'Timestamp' in photom_df.columns:
+        ts_col = 'Timestamp'
+    else:
+        return []
+
+    if 'Input0' not in photom_df.columns:
+        return []
+
+    input0 = photom_df['Input0'].values
+    timestamps = photom_df[ts_col].values
+
+    # Detect rising edges: previous sample is 0, current sample is 1
+    rising = np.where((input0[1:] == 1) & (input0[:-1] == 0))[0] + 1
+    return timestamps[rising].tolist()
+
+
 def load_session_from_files(file_paths: Dict[str, str]) -> Session:
     """
     Factory function to create a Session object from a dictionary of file paths.
@@ -101,7 +129,13 @@ def load_session_from_files(file_paths: Dict[str, str]) -> Session:
         raw_trials = []
 
     # Load Photometry IO for synchronization
+    # For old-format subjects (no separate IO file), we extract IO events
+    # from embedded Input0/Input1 columns in the photometry CSV itself.
+    # When multiple behavioral sessions share one photom CSV, io_event_offset
+    # tells us which slice of IO events belongs to this session.
+    io_event_offset = file_paths.get('io_event_offset', 0)
     baseline_on_timestamps = []
+    _photom_df_preloaded = None  # Cache to avoid double-loading
     if photom_io_path:
         try:
             photom_io_df = io.load_csv_data(photom_io_path)
@@ -111,6 +145,25 @@ def load_session_from_files(file_paths: Dict[str, str]) -> Session:
                 baseline_on_timestamps = baseline_on_df['SystemTimestamp'].tolist()
         except Exception as e:
             print(f"Warning: Failed to load or parse photom_io file: {e}")
+    elif photom_path:
+        # Old format: extract IO events from embedded columns
+        try:
+            _photom_df_preloaded = io.load_csv_data(photom_path)
+            all_baseline_ts = _extract_io_from_embedded_columns(_photom_df_preloaded)
+            # Slice to this session's portion using offset and trial count
+            n_trials = len(raw_trials)
+            start = io_event_offset
+            end = start + n_trials
+            if end <= len(all_baseline_ts):
+                baseline_on_timestamps = all_baseline_ts[start:end]
+            else:
+                # Fallback: take what's available from offset
+                baseline_on_timestamps = all_baseline_ts[start:]
+                if len(baseline_on_timestamps) != n_trials:
+                    print(f"Warning: Expected {n_trials} IO events at offset {start}, "
+                          f"got {len(baseline_on_timestamps)} (total available: {len(all_baseline_ts)})")
+        except Exception as e:
+            print(f"Warning: Failed to extract embedded IO events: {e}")
 
     trials_list = []
     
@@ -118,9 +171,13 @@ def load_session_from_files(file_paths: Dict[str, str]) -> Session:
     if len(baseline_on_timestamps) > 0 and len(raw_trials) != len(baseline_on_timestamps):
         print(f"Warning: Mismatch between trials ({len(raw_trials)}) and baseline timestamps ({len(baseline_on_timestamps)}). Synchronization may be partial.")
     
+    # Outcome label normalization (JSON has 'abort', 'Ref' — see constants.py)
+    from visdetect_photom.core.constants import OUTCOME_NORMALIZATION
+
     for idx, t_data in enumerate(raw_trials):
         # Extract basic fields
-        outcome = t_data.get('trialoutcome', 'Unknown')
+        raw_outcome = t_data.get('trialoutcome', 'Unknown')
+        outcome = OUTCOME_NORMALIZATION.get(raw_outcome, raw_outcome)
         stim_d = t_data.get('stimD', 0.0) # ITI
         stim_t = t_data.get('stimT', 0.0) # Change time
         stim_2tf = t_data.get('Stim2TF')  # Change size
@@ -175,7 +232,8 @@ def load_session_from_files(file_paths: Dict[str, str]) -> Session:
     photom_traces = {}
     if photom_path:
         try:
-            photom_df = io.load_csv_data(photom_path)
+            # Reuse preloaded DataFrame if available (avoids double I/O for old-format)
+            photom_df = _photom_df_preloaded if _photom_df_preloaded is not None else io.load_csv_data(photom_path)
             
             # Process Photometry (De-interleave, Isosbestic Fit, dF/F)
             # This handles the complex logic of LedState 1 vs 2
