@@ -187,3 +187,88 @@ def compute_geometry_metrics_for_session(session, *, use_qc=True,
                          **_metrics_for_trace(mt, t_ax, "change")})
 
     return rows, traces, time_axis
+
+
+import pandas as pd
+from visdetect_photom.analysis.group_statistics import (
+    pushpull_sign_contrast, spearman_with_ci,
+)
+
+
+def build_geometry_dataset(sessions, *, use_qc=True, state_provider=None,
+                           keep_states=None):
+    """Aggregate per-session rows to a PER-MOUSE metrics DataFrame + grouped traces.
+
+    Returns (per_mouse_df, traces_by_group, time_axis):
+      per_mouse_df: one row per (subject_id, genotype, region, epoch, change_size),
+                    metric columns averaged across that mouse's sessions.
+      traces_by_group: {(genotype, region, epoch): [(subject_id, mean_trace), ...]}
+                       (pooled epochs only; per-mouse mean traces).
+      time_axis: shared 1-D axis.
+    """
+    all_rows = []
+    trace_accum = defaultdict(lambda: defaultdict(list))  # (geno,region,epoch)->subj->[traces]
+    time_axis = None
+
+    for sess in sessions:
+        rows, traces, t = compute_geometry_metrics_for_session(
+            sess, use_qc=use_qc, state_provider=state_provider, keep_states=keep_states)
+        if t is not None and time_axis is None:
+            time_axis = t
+        all_rows.extend(rows)
+        if rows:
+            geno = rows[0]["genotype"]
+            subj = rows[0]["subject_id"]
+            for (region, epoch), tr in traces.items():
+                trace_accum[(geno, region, epoch)][subj].append(tr)
+
+    if not all_rows:
+        return pd.DataFrame(), {}, time_axis
+
+    raw = pd.DataFrame(all_rows)
+    group_cols = ["subject_id", "genotype", "region", "epoch", "change_size"]
+    per_mouse = (raw.groupby(group_cols, dropna=False)[_METRIC_KEYS]
+                    .mean().reset_index())
+
+    traces_by_group = {}
+    for key, subj_map in trace_accum.items():
+        traces_by_group[key] = [
+            (subj, np.nanmean(np.array(trs), axis=0)) for subj, trs in subj_map.items()
+        ]
+    return per_mouse, traces_by_group, time_axis
+
+
+def run_pushpull_tests(per_mouse_df, metric="signed_auc"):
+    """Per (region, epoch) D1-vs-D2 push–pull sign contrast over per-mouse values.
+
+    Pooled epochs only (change_size is NaN). Returns a tidy DataFrame.
+    """
+    if per_mouse_df.empty:
+        return pd.DataFrame()
+    pooled = per_mouse_df[per_mouse_df["change_size"].isna()]
+    out = []
+    for (region, epoch), grp in pooled.groupby(["region", "epoch"]):
+        d1 = grp[grp["genotype"] == "D1"][metric].values
+        d2 = grp[grp["genotype"] == "D2"][metric].values
+        res = pushpull_sign_contrast(d1, d2)
+        res.update({"region": region, "epoch": epoch, "metric": metric})
+        out.append(res)
+    return pd.DataFrame(out)
+
+
+def run_grading(per_mouse_df, metric="signed_auc"):
+    """Spearman(metric, log2(change_size)) per genotype x region over graded rows."""
+    if per_mouse_df.empty:
+        return pd.DataFrame()
+    graded = per_mouse_df[per_mouse_df["epoch"] == "change_hit_graded"].dropna(
+        subset=["change_size", metric])
+    out = []
+    for (geno, region), grp in graded.groupby(["genotype", "region"]):
+        if grp["change_size"].nunique() < 3:
+            continue
+        x = np.log2(grp["change_size"].values.astype(float))
+        y = grp[metric].values.astype(float)
+        res = spearman_with_ci(x, y)
+        res.update({"genotype": geno, "region": region, "metric": metric})
+        out.append(res)
+    return pd.DataFrame(out)
