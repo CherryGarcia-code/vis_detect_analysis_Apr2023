@@ -47,6 +47,7 @@ from visdetect_photom.core.qc import (
 from visdetect_photom.analysis.statistics import extract_peth
 from visdetect_photom.analysis.group_statistics import (
     mannwhitney_with_effect_size, permutation_test, bootstrap_ci, format_stats_table,
+    extract_signed_peak,
 )
 from visdetect_photom.analysis.group_utils import (
     get_genotype, get_region, _get_event_times, compute_session_summary,
@@ -227,17 +228,9 @@ def aggregate_traces(trial_list):
 
 
 def extract_peak(trace, time_axis, peak_window=PEAK_WINDOW):
-    """Extract peak (abs-max) value within peak_window. Captures both activation and suppression."""
-    mask = (time_axis >= peak_window[0]) & (time_axis <= peak_window[1])
-    if not np.any(mask):
-        return np.nan
-    segment = trace[mask]
-    valid = segment[np.isfinite(segment)]
-    if len(valid) == 0:
-        return np.nan
-    # abs-max: preserves sign, captures suppression
-    idx = np.argmax(np.abs(valid))
-    return float(valid[idx])
+    """Peak (abs-max, sign-preserving) value within peak_window. Delegates to the
+    canonical implementation in group_statistics."""
+    return extract_signed_peak(trace, time_axis, peak_window)
 
 
 # ── Plotting functions ────────────────────────────────────────
