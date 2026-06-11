@@ -70,7 +70,8 @@ def _log2_tf(vals):
 
 
 def fast_slow_pulse_times(trial):
-    """(fast_times, slow_times) by log2(TF) vs +/-0.25 within the usable window."""
+    """(fast_times, slow_times): absolute photometry timestamps (not TF values) of
+    fast/slow pulses, classified by log2(TF) vs +/-0.25 within the usable window."""
     vals, times = windowed_pulses(trial)
     if vals.size == 0:
         return np.array([]), np.array([])
@@ -103,9 +104,14 @@ def validate_change_anchor(trial, tol=TF_CHANGE_VALIDATE_TOL):
         return True, np.nan
     if tf is None or vbl is None or onset is None or trial.absolute_change_time is None:
         return True, np.nan
-    tf = np.asarray(tf, float); vbl = np.asarray(vbl, float)
+    tf = np.asarray(tf, float)
+    vbl = np.asarray(vbl, float)
     if tf.size != vbl.size or tf.size == 0:
         return True, np.nan
+    # Onset = first nonzero TF frame. Assumes the pre-baseline (ITI gray) period
+    # is exactly TF == 0, which holds for this task protocol. A nonzero pre-baseline
+    # (protocol variant / corrupt gray frames) would mis-locate onset and silently
+    # drop otherwise-valid trials, so this contract is worth knowing if data changes.
     nz = np.where(tf > 0)[0]
     if nz.size == 0:
         return True, np.nan
