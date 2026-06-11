@@ -157,7 +157,10 @@ def pulse_triggered_average(signal, timestamps, pulse_times,
     rows = np.asarray(rows)
     mean = np.nanmean(rows, axis=0)
     n = np.sum(~np.isnan(rows), axis=0)
-    sem = np.nanstd(rows, axis=0) / np.sqrt(np.maximum(n, 1))
+    # SEM = sample std (ddof=1) / sqrt(n); columns with n<2 yield NaN (honest: a
+    # single observation has no defined SEM). maximum(n,1) only guards the divide.
+    with np.errstate(invalid="ignore"):
+        sem = np.nanstd(rows, axis=0, ddof=1) / np.sqrt(np.maximum(n, 1))
     return t_vec, mean, sem
 
 
@@ -165,7 +168,9 @@ def detrend_pulse_trace(t_vec, trace,
                         baseline=TF_PULSE_DETREND_BASELINE, post=TF_PULSE_DETREND_POST):
     """Linear-detrend on the baseline window; measure post-pulse peak/trough.
 
-    Ports the ephys detrend_tf_traces. Returns (detrended, z_max_post, z_min_post).
+    Ports the ephys detrend_tf_traces. Returns (detrended, max_post, min_post),
+    where max_post/min_post are the peak/trough of the detrended trace over the
+    post window in input units (e.g. z-dF/F), NOT a re-z-scored value.
     """
     t = np.asarray(t_vec, float)
     tr = np.asarray(trace, float)
@@ -174,7 +179,7 @@ def detrend_pulse_trace(t_vec, trace,
     if pre.sum() < 2:
         zmax = float(np.nanmax(tr[pm])) if pm.any() else np.nan
         zmin = float(np.nanmin(tr[pm])) if pm.any() else np.nan
-        return tr, zmax, zmin
+        return tr.copy(), zmax, zmin
     coef = np.polyfit(t[pre], tr[pre], 1)
     d = tr - np.polyval(coef, t)
     zmax = float(np.nanmax(d[pm])) if pm.any() else np.nan

@@ -94,3 +94,19 @@ def test_detrend_removes_linear_trend():
             trace[i] += 3.0      # planted post-pulse peak
     detr, zmax, zmin = detrend_pulse_trace(t, trace)
     assert zmax > 2.0 and abs(np.mean(detr[t < 0.0])) < 0.5
+
+
+def test_pulse_triggered_returns_none_when_no_pulses():
+    ts = np.arange(0, 10, 0.01)
+    sig = np.zeros_like(ts)
+    assert pulse_triggered_average(sig, ts, []) is None
+    assert pulse_triggered_average(sig, ts, [np.nan, np.nan]) is None
+
+
+def test_detrend_fallback_few_baseline_points():
+    # No samples in the baseline window (-0.4, -0.01) -> raw trace returned,
+    # peak/trough measured on the post window (0.0, 0.3).
+    t = np.array([0.0, 0.1, 0.2])
+    trace = np.array([1.0, 5.0, 2.0])
+    detr, zmax, zmin = detrend_pulse_trace(t, trace)
+    assert np.allclose(detr, trace) and zmax == 5.0 and zmin == 1.0
