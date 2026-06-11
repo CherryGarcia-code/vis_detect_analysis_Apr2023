@@ -1,7 +1,7 @@
 """TRF kernel estimation for baseline TF -> dF/F (G1). numpy-only ridge."""
 import numpy as np
 from visdetect_photom.core.constants import (
-    TRF_LAG_MIN, TRF_LAG_MAX, TRF_LAG_STEP, TF_SAMPLE_PERIOD,
+    TRF_LAG_MIN, TRF_LAG_MAX, TRF_LAG_STEP, TF_SAMPLE_PERIOD, SAMPLING_FREQ,
     TF_PULSE_PRE_WINDOW, TF_PULSE_POST_WINDOW,
     TF_PULSE_DETREND_BASELINE, TF_PULSE_DETREND_POST,
 )
@@ -131,7 +131,7 @@ def shuffle_null(segments, lags=None, n_shuffles=200, seed=42):
 
 
 def pulse_triggered_average(signal, timestamps, pulse_times,
-                            pre=TF_PULSE_PRE_WINDOW, post=TF_PULSE_POST_WINDOW, fs=100.0):
+                            pre=TF_PULSE_PRE_WINDOW, post=TF_PULSE_POST_WINDOW, fs=SAMPLING_FREQ):
     """Mean +/- SEM dF/F around pulses, z-scored to the pre-pulse window.
 
     Returns (t_vec, mean, sem) or None if no pulses.
