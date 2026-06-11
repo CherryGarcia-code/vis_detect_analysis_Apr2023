@@ -134,3 +134,23 @@ OLD_FORMAT_COLUMN_MAP = {
 # Minimum photometry CSV file size (bytes) to consider a real session.
 # Smaller files are test/startup recordings and should be skipped.
 MIN_PHOTOM_CSV_BYTES = 50_000
+
+# ── TF-pulse / evidence encoding (G1) — mirrors ephys tf_pulse.py conventions ──
+TF_BASE_HZ = 1.0                       # nominal base temporal frequency
+TF_BASELINE_STRIDE = 3                 # St1TrialVector repeats each pulse 3x (60fps)
+TF_SAMPLE_PERIOD = 0.05                # seconds per baseline pulse sample (50 ms)
+TF_FAST_THRESH_LOG2 = 0.25             # fast pulse: log2(TF) >= +0.25
+TF_SLOW_THRESH_LOG2 = -0.25            # slow pulse: log2(TF) <= -0.25
+TF_MIN_AFTER_BASELINE = 1.0            # exclude pulses < 1.0 s after baseline onset
+TF_MIN_BEFORE_CHANGE = 1.0             # exclude pulses < 1.0 s before change
+TF_MIN_BEFORE_OUTCOME_FA_ABORT = 2.0   # exclude pulses < 2.0 s before FA/abort lick
+TF_PULSE_PRE_WINDOW = (-0.4, 0.0)      # pre-pulse z-score baseline
+TF_PULSE_POST_WINDOW = (0.0, 0.5)      # post-pulse response window
+TF_PULSE_DETREND_BASELINE = (-0.4, -0.01)
+TF_PULSE_DETREND_POST = (0.0, 0.3)
+TF_CHANGE_VALIDATE_MIN_CS = 2.0        # only run change-anchor validation when change_size >= this
+TF_CHANGE_VALIDATE_TOL = 0.05          # 50 ms mismatch tolerance
+# TRF lag grid (negatives = causality control)
+TRF_LAG_MIN = -0.5
+TRF_LAG_MAX = 2.0
+TRF_LAG_STEP = 0.05
