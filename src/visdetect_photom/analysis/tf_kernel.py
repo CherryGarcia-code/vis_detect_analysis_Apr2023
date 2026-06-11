@@ -7,6 +7,7 @@ from visdetect_photom.core.stimulus import aligned_baseline_regressor, validate_
 
 
 def lag_grid():
+    """TRF lag grid (TRF_LAG_MIN..TRF_LAG_MAX in TRF_LAG_STEP increments, seconds)."""
     n = int(round((TRF_LAG_MAX - TRF_LAG_MIN) / TRF_LAG_STEP)) + 1
     return np.round(np.linspace(TRF_LAG_MIN, TRF_LAG_MAX, n), 6)
 
@@ -56,6 +57,8 @@ def _ridge_gcv(X, y, alphas):
         gcv = (rss / n) / (1.0 - df / n) ** 2 if df < n else np.inf
         if gcv < best_gcv:
             best_gcv, best_w = gcv, w
+    if best_w is None:
+        raise ValueError("_ridge_gcv: no valid alpha found (alphas empty or all df >= n)")
     return best_w
 
 

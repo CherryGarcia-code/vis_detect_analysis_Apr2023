@@ -54,3 +54,18 @@ def test_shuffle_null_shape():
     x = rng.standard_normal(2000); y = rng.standard_normal(2000)
     lags, lo, hi = shuffle_null([(x, y)], n_shuffles=20)
     assert lo.shape == lags.shape and hi.shape == lags.shape and np.all(hi >= lo)
+
+
+def test_fit_trf_segments_isolated():
+    """Primary invariant: lag embedding never crosses trial boundaries.
+
+    Two L=10 segments are each too short to yield any lag-embedded rows (smax=11),
+    so the kernel is all-NaN. The same 20 samples concatenated WOULD yield rows --
+    confirming segments are kept isolated rather than merged.
+    """
+    lags = np.arange(0.0, 0.6, 0.05)  # causal-only grid, smax=11
+    short_segs = [(np.ones(10), np.zeros(10)), (np.ones(10), np.zeros(10))]
+    _, k_isolated = fit_trf(short_segs, lags=lags)
+    assert not np.any(np.isfinite(k_isolated)), "cross-trial lag bleed detected"
+    _, k_merged = fit_trf([(np.ones(20), np.zeros(20))], lags=lags)
+    assert np.any(np.isfinite(k_merged))
