@@ -13,6 +13,7 @@ def test_runs_on_small_subset(tmp_path):
     out = tmp_path / "out"
     proc = subprocess.run(
         [sys.executable, SCRIPT, "--max_sessions", "4", "--output_dir", str(out)],
+        # TRF ridge fitting is slower than PETH extraction — extra headroom vs script 08.
         cwd=REPO, capture_output=True, text=True, timeout=900,
     )
     assert proc.returncode == 0, proc.stderr[-2000:]

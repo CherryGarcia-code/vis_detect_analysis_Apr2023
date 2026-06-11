@@ -31,9 +31,11 @@ from visdetect_photom.analysis.group_utils import get_genotype
 from visdetect_photom.analysis.group_statistics import pushpull_sign_contrast, format_stats_table
 from visdetect_photom.analysis.state_provider import PooledStateProvider, HMMStateProvider, filter_trials_by_state
 from visdetect_photom.analysis.tf_kernel import (
-    lag_grid, build_region_design, fit_trf, kernel_timescale, shuffle_null,
+    lag_grid, build_region_design, fit_trf, kernel_timescale,
     pulse_triggered_average,
 )
+# NOTE: tf_kernel.shuffle_null (per-group kernel significance band) is intentionally
+# not wired into this CLI yet — deferred per the G1 spec (§7/§8) as a follow-up.
 from visdetect_photom.core.stimulus import fast_slow_pulse_times
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -59,6 +61,8 @@ def _region_sources(session, subj, use_qc):
             out[r] = trs[0]
         elif len(trs) >= 2:
             n = min(len(s) for s, _ in trs)
+            # ROIs within a session share one timestamp axis (same processed_df in
+            # session.py), so averaging signals on trs[0]'s clock is sample-aligned.
             out[r] = (np.mean([s[:n] for s, _ in trs], axis=0), trs[0][1][:n])
     return out
 
@@ -89,6 +93,9 @@ def collect(session_files, *, use_qc, state_provider, keep_states, max_sessions,
         keep = None
         if state_provider is not None and keep_states is not None:
             keep = filter_trials_by_state(sess, state_provider, keep_states)
+            if len(keep) == 0:
+                logging.warning(f"  {subj}: state filter kept 0 trials — session skipped.")
+                continue
         sources = _region_sources(sess, subj, use_qc)
         for region, (sig, ts) in sources.items():
             segs = build_region_design(sess, sig, ts, state_keep=keep, validate=True)
@@ -146,6 +153,7 @@ def main():
             logging.error("--state-filter requires --state-results-dir"); sys.exit(1)
         provider = HMMStateProvider(args.state_results_dir)
         keep_states = [s.strip() for s in args.state_filter.split(",")]
+        logging.info(f"State filter: keep {keep_states} (from {args.state_results_dir})")
     else:
         provider, keep_states = PooledStateProvider(), ["All"]
 
