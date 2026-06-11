@@ -375,3 +375,43 @@ def extract_merged_region_peths(
         results[region_name] = (peth_mat, t_ax, source)
 
     return results
+
+
+# ── Region source resolution (shared by analyses) ────────────
+from collections import defaultdict as _defaultdict
+
+
+def region_sources(session, use_qc: bool = True) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    """Return {region_base: (signal, timestamps)} for a session.
+
+    use_qc=True : QC each ROI, then hemisphere-merge (both pass -> average,
+                  one passes -> use it, neither -> skip).
+    use_qc=False: average all ROIs that map to the same base region (no QC gate).
+    """
+    if use_qc:
+        qc = compute_session_roi_qc(session)
+        merged = merge_hemispheres(session, qc_results=qc)
+        return {r: (m["signal"], m["timestamps"]) for r, m in merged.items()}
+
+    subject_id = getattr(session, "subject_id", None)
+    if subject_id and not subject_id.startswith("BG_"):
+        subject_full = f"BG_{subject_id.zfill(3)}" if subject_id.isdigit() else subject_id
+    else:
+        subject_full = subject_id
+
+    by_region = _defaultdict(list)
+    for roi_name, trace in session.photometry_data.items():
+        region = get_roi_region(roi_name, subject_full)
+        if region is None:
+            continue
+        by_region[region.rsplit("_", 1)[0]].append((trace.signal, trace.timestamps))
+
+    sources = {}
+    for region, traces in by_region.items():
+        if len(traces) == 1:
+            sources[region] = traces[0]
+        elif len(traces) >= 2:
+            n = min(len(s) for s, _ in traces)
+            avg = np.mean([s[:n] for s, _ in traces], axis=0)
+            sources[region] = (avg, traces[0][1][:n])
+    return sources
