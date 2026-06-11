@@ -2,6 +2,8 @@
 import numpy as np
 from visdetect_photom.core.constants import (
     TRF_LAG_MIN, TRF_LAG_MAX, TRF_LAG_STEP, TF_SAMPLE_PERIOD,
+    TF_PULSE_PRE_WINDOW, TF_PULSE_POST_WINDOW,
+    TF_PULSE_DETREND_BASELINE, TF_PULSE_DETREND_POST,
 )
 from visdetect_photom.core.stimulus import aligned_baseline_regressor, validate_change_anchor
 
@@ -126,3 +128,55 @@ def shuffle_null(segments, lags=None, n_shuffles=200, seed=42):
         null.append(k)
     null = np.asarray(null)
     return np.asarray(lags), np.nanpercentile(null, 2.5, axis=0), np.nanpercentile(null, 97.5, axis=0)
+
+
+def pulse_triggered_average(signal, timestamps, pulse_times,
+                            pre=TF_PULSE_PRE_WINDOW, post=TF_PULSE_POST_WINDOW, fs=100.0):
+    """Mean +/- SEM dF/F around pulses, z-scored to the pre-pulse window.
+
+    Returns (t_vec, mean, sem) or None if no pulses.
+    """
+    pulse_times = np.asarray(pulse_times, float)
+    pulse_times = pulse_times[np.isfinite(pulse_times)]
+    if pulse_times.size == 0:
+        return None
+    ts = np.asarray(timestamps, float)
+    sig = np.asarray(signal, float)
+    t_vec = np.arange(pre[0], post[1] + 1e-9, 1.0 / fs)
+    pre_mask = (t_vec >= pre[0]) & (t_vec < pre[1])
+    rows = []
+    for pt in pulse_times:
+        target = pt + t_vec
+        idx = np.clip(np.searchsorted(ts, target), 0, len(sig) - 1)
+        vals = sig[idx].astype(float)
+        vals[np.abs(ts[idx] - target) >= (1.5 / fs)] = np.nan
+        b = vals[pre_mask]
+        m, s = np.nanmean(b), np.nanstd(b)
+        vals = (vals - m) / s if (np.isfinite(s) and s > 1e-9) else vals - m
+        rows.append(vals)
+    rows = np.asarray(rows)
+    mean = np.nanmean(rows, axis=0)
+    n = np.sum(~np.isnan(rows), axis=0)
+    sem = np.nanstd(rows, axis=0) / np.sqrt(np.maximum(n, 1))
+    return t_vec, mean, sem
+
+
+def detrend_pulse_trace(t_vec, trace,
+                        baseline=TF_PULSE_DETREND_BASELINE, post=TF_PULSE_DETREND_POST):
+    """Linear-detrend on the baseline window; measure post-pulse peak/trough.
+
+    Ports the ephys detrend_tf_traces. Returns (detrended, z_max_post, z_min_post).
+    """
+    t = np.asarray(t_vec, float)
+    tr = np.asarray(trace, float)
+    pre = (t >= baseline[0]) & (t < baseline[1])
+    pm = (t >= post[0]) & (t < post[1])
+    if pre.sum() < 2:
+        zmax = float(np.nanmax(tr[pm])) if pm.any() else np.nan
+        zmin = float(np.nanmin(tr[pm])) if pm.any() else np.nan
+        return tr, zmax, zmin
+    coef = np.polyfit(t[pre], tr[pre], 1)
+    d = tr - np.polyval(coef, t)
+    zmax = float(np.nanmax(d[pm])) if pm.any() else np.nan
+    zmin = float(np.nanmin(d[pm])) if pm.any() else np.nan
+    return d, zmax, zmin

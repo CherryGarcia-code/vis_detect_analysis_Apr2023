@@ -69,3 +69,28 @@ def test_fit_trf_segments_isolated():
     assert not np.any(np.isfinite(k_isolated)), "cross-trial lag bleed detected"
     _, k_merged = fit_trf([(np.ones(20), np.zeros(20))], lags=lags)
     assert np.any(np.isfinite(k_merged))
+
+
+from visdetect_photom.analysis.tf_kernel import pulse_triggered_average, detrend_pulse_trace
+
+
+def test_pulse_triggered_recovers_bump():
+    fs = 100.0
+    ts = np.arange(0, 60, 1 / fs)
+    sig = np.zeros_like(ts)
+    pulses = np.array([10.0, 20.0, 30.0, 40.0])
+    for p in pulses:
+        sig += 1.5 * np.exp(-((ts - (p + 0.2)) ** 2) / (2 * 0.05 ** 2))
+    t_vec, mean, sem = pulse_triggered_average(sig, ts, pulses, fs=fs)
+    post = (t_vec >= 0.1) & (t_vec <= 0.3)
+    assert np.nanmax(mean[post]) > 2.0   # z-scored bump
+
+
+def test_detrend_removes_linear_trend():
+    t = np.linspace(-0.4, 0.5, 90)
+    trace = 5.0 * t + 0.0       # pure linear, no post-pulse feature
+    for i, tt in enumerate(t):
+        if 0.1 <= tt <= 0.2:
+            trace[i] += 3.0      # planted post-pulse peak
+    detr, zmax, zmin = detrend_pulse_trace(t, trace)
+    assert zmax > 2.0 and abs(np.mean(detr[t < 0.0])) < 0.5
