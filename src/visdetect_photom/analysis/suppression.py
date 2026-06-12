@@ -9,11 +9,15 @@ D1 and D2 are DIFFERENT animals: every D1-vs-D2 result is a GROUP-LEVEL sign
 contrast, never within-animal anticorrelation.
 """
 import numpy as np
+import pandas as pd
 
 from visdetect_photom.core.constants import (
     CATCH_THRESHOLD, WINDOW_MIN_SAMPLES, SCHEME1_WINDOW, SCHEME1_MOTOR_BUFFER,
     SCHEME3_L, SCHEME3_BUFFER, HAZARD_RESAMPLES, HAZARD_SEED,
 )
+from visdetect_photom.core.qc import region_sources
+from visdetect_photom.analysis.group_utils import get_genotype
+from visdetect_photom.analysis.state_provider import filter_trials_by_state
 
 # Groups that represent a premature action (have an action time = lick_elapsed)
 _ACTION_GROUPS = ("lick", "abort")
@@ -158,3 +162,67 @@ def scheme3_scalars(action_records, withhold_records, signal, timestamps,
         withhold_vals.append((r["trial_index"],
                               float(np.mean(means)) if means else np.nan))
     return action_vals, withhold_vals
+
+
+def build_session_scalars(session, *, track, scheme, use_qc=True,
+                          state_provider=None, keep_states=None, stage="Unknown"):
+    """Per-trial waiting-period scalar rows for one session (one track, one scheme).
+
+    Row keys: subject_id, genotype, region, track, scheme, group, trial_index,
+              scalar, session_id, stage.
+    """
+    subject_full = _subject_full(session.subject_id)
+    genotype = get_genotype(subject_full)
+    if genotype == "Unknown":
+        return []
+
+    keep = None
+    if state_provider is not None and keep_states is not None:
+        keep = filter_trials_by_state(session, state_provider, keep_states)
+
+    records = trial_waiting_records(session, track, keep)
+    sources = region_sources(session, use_qc)
+    rows = []
+
+    def _emit(region, group, trial_index, scalar):
+        rows.append({"subject_id": subject_full, "genotype": genotype,
+                     "region": region, "track": track, "scheme": scheme,
+                     "group": group, "trial_index": trial_index,
+                     "scalar": scalar, "session_id": session.session_id,
+                     "stage": stage})
+
+    for region, (sig, ts) in sources.items():
+        if scheme == "scheme1":
+            for r in records:
+                _emit(region, r["group"], r["trial_index"],
+                      scheme1_scalar(r, sig, ts))
+        elif scheme == "scheme3":
+            # Primary lick-vs-withhold. Withhold scalars are hazard-matched to the
+            # lick elapsed-time distribution. Abort is scheme1-only (exploratory):
+            # it would need its own abort-matched withhold control, out of scope here.
+            lick = [r for r in records if r["group"] == "lick"]
+            withhold = [r for r in records if r["group"] == "withhold"]
+            a_vals, w_vals = scheme3_scalars(lick, withhold, sig, ts)
+            for ti, v in a_vals:
+                _emit(region, "lick", ti, v)
+            for ti, v in w_vals:
+                _emit(region, "withhold", ti, v)
+        else:
+            raise ValueError(f"unknown scheme: {scheme!r}")
+    return rows
+
+
+def build_suppression_dataset(sessions, *, track, scheme, use_qc=True,
+                              state_provider=None, keep_states=None, manifest=None):
+    """Concatenate per-trial scalar rows across sessions into a DataFrame.
+
+    If `manifest` is given, each session's learning stage is attached.
+    """
+    from visdetect_photom.core.staging import get_session_stage
+    all_rows = []
+    for sess in sessions:
+        stage = get_session_stage(sess, manifest) if manifest is not None else "Unknown"
+        all_rows.extend(build_session_scalars(
+            sess, track=track, scheme=scheme, use_qc=use_qc,
+            state_provider=state_provider, keep_states=keep_states, stage=stage))
+    return pd.DataFrame(all_rows)
