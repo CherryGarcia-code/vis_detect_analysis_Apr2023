@@ -244,6 +244,10 @@ def compute_delta_and_auroc(per_trial_df, min_n=MIN_TRIALS_PER_GROUP):
     delta = mean(withhold) - mean(lick); auroc = AUROC of scalar discriminating
     withhold (positive) from lick. Cells with < min_n finite scalars in either
     group are dropped. Returns a per-mouse DataFrame.
+
+    Caller must pass a DataFrame already filtered to a single (track, scheme)
+    combination; the groupby keys do not include track/scheme, so mixing them
+    would silently pool scalars from different windows.
     """
     if per_trial_df.empty:
         return pd.DataFrame()
@@ -291,8 +295,7 @@ def run_suppression_stats(per_mouse_df):
         perm_p = (permutation_test(d1a, d2a)["p"]
                   if d1a.size >= 2 and d2a.size >= 2 else np.nan)
         for geno, vals in (("D1", d1a), ("D2", d2a)):
-            ci = bootstrap_ci(vals) if vals.size >= 2 else {"observed": np.nan,
-                                                            "ci_lo": np.nan, "ci_hi": np.nan}
+            ci = bootstrap_ci(vals)
             au_rows.append({"region": region, "genotype": geno, "n_mice": int(vals.size),
                             "auroc_mean": ci["observed"], "ci_lo": ci["ci_lo"],
                             "ci_hi": ci["ci_hi"],

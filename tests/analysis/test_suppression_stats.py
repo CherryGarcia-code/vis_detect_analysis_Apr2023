@@ -49,3 +49,18 @@ def test_run_suppression_stats_pushpull_opposite_sign():
     row = pp[pp["region"] == "DMS"].iloc[0]
     assert row["d1_sign"] == 1 and row["d2_sign"] == -1
     assert set(au["genotype"]) == {"D1", "D2"}
+
+
+def test_run_suppression_stats_single_mouse_reports_point_estimate():
+    # One mouse per genotype in a region -> n=1 each. bootstrap_ci should still
+    # report the observed AUROC point estimate (not NaN), with no CI.
+    pm = pd.DataFrame([
+        {"subject_id": "BG_013", "genotype": "D1", "region": "DMS", "delta": 0.5, "auroc": 0.8},
+        {"subject_id": "BG_016", "genotype": "D2", "region": "DMS", "delta": -0.5, "auroc": 0.2},
+    ])
+    _, au = run_suppression_stats(pm)
+    d1row = au[(au["region"] == "DMS") & (au["genotype"] == "D1")].iloc[0]
+    assert d1row["n_mice"] == 1
+    assert d1row["auroc_mean"] == 0.8       # point estimate preserved, not NaN
+    assert np.isnan(d1row["ci_lo"])         # no CI possible with n=1
+    assert bool(d1row["excludes_chance"]) is False
