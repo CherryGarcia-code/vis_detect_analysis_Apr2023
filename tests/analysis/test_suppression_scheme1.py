@@ -30,3 +30,8 @@ def test_scheme1_lick_excluded_when_lick_too_soon():
     # lick_elapsed=3.5 < 4 -> NaN (no clean pre-lick window; e.g. impulsive early FA)
     r = _rec("lick", onset_abs=20.0, change_time=6.0, lick_elapsed=3.5)
     assert np.isnan(scheme1_scalar(r, SIG, TS))
+
+def test_scheme1_withhold_excluded_when_change_coincides_with_window_end():
+    # change_time == w1 (3.0): window's last sample is at the change onset -> excluded (NaN)
+    r = _rec("withhold", onset_abs=10.0, change_time=3.0)
+    assert np.isnan(scheme1_scalar(r, SIG, TS))

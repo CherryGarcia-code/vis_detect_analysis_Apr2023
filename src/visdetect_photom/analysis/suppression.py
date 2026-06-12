@@ -94,12 +94,12 @@ def scheme1_scalar(record, signal, timestamps,
                    window=SCHEME1_WINDOW, motor_buffer=SCHEME1_MOTOR_BUFFER):
     """Baseline-onset-anchored fixed-window mean for one trial, or NaN if excluded.
 
-    Window [onset+w0, onset+w1]. Excluded unless it ends before the change
-    (change_time >= w1); for action groups (lick/abort) it must also end
+    Window [onset+w0, onset+w1]. Excluded unless it ends strictly before the
+    change (change_time > w1); for action groups (lick/abort) it must also end
     motor_buffer before the action (lick_elapsed >= w1 + motor_buffer).
     """
     w0, w1 = window
-    if record["change_time"] is None or record["change_time"] < w1:
+    if record["change_time"] is None or record["change_time"] <= w1:
         return np.nan
     if record["group"] in _ACTION_GROUPS:
         le = record["lick_elapsed"]
