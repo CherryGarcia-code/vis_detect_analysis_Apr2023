@@ -11,7 +11,7 @@ contrast, never within-animal anticorrelation.
 import numpy as np
 
 from visdetect_photom.core.constants import (
-    CATCH_THRESHOLD, WINDOW_MIN_SAMPLES,
+    CATCH_THRESHOLD, WINDOW_MIN_SAMPLES, SCHEME1_WINDOW, SCHEME1_MOTOR_BUFFER,
 )
 
 # Groups that represent a premature action (have an action time = lick_elapsed)
@@ -88,3 +88,23 @@ def trial_waiting_records(session, track, keep=None):
             "lick_elapsed": lick_elapsed,
         })
     return out
+
+
+def scheme1_scalar(record, signal, timestamps,
+                   window=SCHEME1_WINDOW, motor_buffer=SCHEME1_MOTOR_BUFFER):
+    """Baseline-onset-anchored fixed-window mean for one trial, or NaN if excluded.
+
+    Window [onset+w0, onset+w1]. Excluded unless it ends before the change
+    (change_time >= w1); for action groups (lick/abort) it must also end
+    motor_buffer before the action (lick_elapsed >= w1 + motor_buffer).
+    """
+    w0, w1 = window
+    if record["change_time"] is None or record["change_time"] < w1:
+        return np.nan
+    if record["group"] in _ACTION_GROUPS:
+        le = record["lick_elapsed"]
+        if not np.isfinite(le) or le < w1 + motor_buffer:
+            return np.nan
+    t0 = record["onset_abs"] + w0
+    t1 = record["onset_abs"] + w1
+    return window_mean(signal, timestamps, t0, t1)
