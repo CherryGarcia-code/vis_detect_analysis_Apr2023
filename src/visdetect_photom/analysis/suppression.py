@@ -12,6 +12,7 @@ import numpy as np
 
 from visdetect_photom.core.constants import (
     CATCH_THRESHOLD, WINDOW_MIN_SAMPLES, SCHEME1_WINDOW, SCHEME1_MOTOR_BUFFER,
+    SCHEME3_L, SCHEME3_BUFFER, HAZARD_RESAMPLES, HAZARD_SEED,
 )
 
 # Groups that represent a premature action (have an action time = lick_elapsed)
@@ -108,3 +109,52 @@ def scheme1_scalar(record, signal, timestamps,
     t0 = record["onset_abs"] + w0
     t1 = record["onset_abs"] + w1
     return window_mean(signal, timestamps, t0, t1)
+
+
+def scheme3_scalars(action_records, withhold_records, signal, timestamps,
+                    L=SCHEME3_L, buffer=SCHEME3_BUFFER,
+                    n_resample=HAZARD_RESAMPLES, seed=HAZARD_SEED):
+    """Hazard-time-matched waiting-period scalars (Scheme 3).
+
+    action_records: premature-action trials (FA licks or aborts). Window
+        [act-buffer-L, act-buffer], ending `buffer` before the action.
+    withhold_records: trials that reached the change. For each, draw
+        `n_resample` pseudo-action elapsed-times from the action group's
+        elapsed-time distribution (truncated to <= change_time and window
+        start >= 0), average the per-draw window means. Deterministic (seed).
+
+    Returns (action_vals, withhold_vals), each a list of (trial_index, scalar).
+    """
+    action_vals = []
+    elapsed_pool = []
+    for r in action_records:
+        le = r["lick_elapsed"]
+        if np.isfinite(le):
+            elapsed_pool.append(le)
+        if not np.isfinite(le) or (le - buffer - L) < 0:
+            action_vals.append((r["trial_index"], np.nan))
+            continue
+        ws = r["onset_abs"] + le - buffer - L
+        we = r["onset_abs"] + le - buffer
+        action_vals.append((r["trial_index"], window_mean(signal, timestamps, ws, we)))
+
+    pool = np.asarray(elapsed_pool, dtype=float)
+    rng = np.random.default_rng(seed)
+    withhold_vals = []
+    for r in withhold_records:
+        if pool.size == 0 or not np.isfinite(r["change_time"]):
+            withhold_vals.append((r["trial_index"], np.nan))
+            continue
+        draws = rng.choice(pool, size=n_resample, replace=True)
+        means = []
+        for tau in draws:
+            if tau > r["change_time"] or (tau - buffer - L) < 0:
+                continue
+            ws = r["onset_abs"] + tau - buffer - L
+            we = r["onset_abs"] + tau - buffer
+            m = window_mean(signal, timestamps, ws, we)
+            if np.isfinite(m):
+                means.append(m)
+        withhold_vals.append((r["trial_index"],
+                              float(np.mean(means)) if means else np.nan))
+    return action_vals, withhold_vals
