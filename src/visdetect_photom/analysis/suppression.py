@@ -18,6 +18,7 @@ from visdetect_photom.core.constants import (
 from visdetect_photom.core.qc import region_sources
 from visdetect_photom.analysis.group_utils import get_genotype
 from visdetect_photom.analysis.state_provider import filter_trials_by_state
+from visdetect_photom.core.staging import get_session_stage
 
 # Groups that represent a premature action (have an action time = lick_elapsed)
 _ACTION_GROUPS = ("lick", "abort")
@@ -164,6 +165,10 @@ def scheme3_scalars(action_records, withhold_records, signal, timestamps,
     return action_vals, withhold_vals
 
 
+_DATASET_COLUMNS = ["subject_id", "genotype", "region", "track", "scheme",
+                    "group", "trial_index", "scalar", "session_id", "stage"]
+
+
 def build_session_scalars(session, *, track, scheme, use_qc=True,
                           state_provider=None, keep_states=None, stage="Unknown"):
     """Per-trial waiting-period scalar rows for one session (one track, one scheme).
@@ -218,11 +223,12 @@ def build_suppression_dataset(sessions, *, track, scheme, use_qc=True,
 
     If `manifest` is given, each session's learning stage is attached.
     """
-    from visdetect_photom.core.staging import get_session_stage
     all_rows = []
     for sess in sessions:
         stage = get_session_stage(sess, manifest) if manifest is not None else "Unknown"
         all_rows.extend(build_session_scalars(
             sess, track=track, scheme=scheme, use_qc=use_qc,
             state_provider=state_provider, keep_states=keep_states, stage=stage))
+    if not all_rows:
+        return pd.DataFrame(columns=_DATASET_COLUMNS)
     return pd.DataFrame(all_rows)

@@ -47,3 +47,11 @@ def test_build_dataset_two_genotypes_and_scheme3():
     assert set(df["genotype"]) == {"D1", "D2"}
     assert set(df["group"]) >= {"lick", "withhold"}
     assert "session_id" in df.columns
+
+
+def test_build_dataset_empty_returns_documented_columns():
+    df = build_suppression_dataset([], track="behavioral_fa", scheme="scheme1")
+    assert df.empty
+    for col in ("subject_id", "genotype", "region", "track", "scheme",
+                "group", "trial_index", "scalar", "session_id", "stage"):
+        assert col in df.columns
