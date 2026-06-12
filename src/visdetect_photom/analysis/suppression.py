@@ -14,6 +14,10 @@ import pandas as pd
 from visdetect_photom.core.constants import (
     CATCH_THRESHOLD, WINDOW_MIN_SAMPLES, SCHEME1_WINDOW, SCHEME1_MOTOR_BUFFER,
     SCHEME3_L, SCHEME3_BUFFER, HAZARD_RESAMPLES, HAZARD_SEED,
+    MIN_TRIALS_PER_GROUP,
+)
+from visdetect_photom.analysis.group_statistics import (
+    auroc_score, bootstrap_ci, permutation_test, pushpull_sign_contrast,
 )
 from visdetect_photom.core.qc import region_sources
 from visdetect_photom.analysis.group_utils import get_genotype
@@ -232,3 +236,67 @@ def build_suppression_dataset(sessions, *, track, scheme, use_qc=True,
     if not all_rows:
         return pd.DataFrame(columns=_DATASET_COLUMNS)
     return pd.DataFrame(all_rows)
+
+
+def compute_delta_and_auroc(per_trial_df, min_n=MIN_TRIALS_PER_GROUP):
+    """Per (subject_id, genotype, region) waiting-period summary.
+
+    delta = mean(withhold) - mean(lick); auroc = AUROC of scalar discriminating
+    withhold (positive) from lick. Cells with < min_n finite scalars in either
+    group are dropped. Returns a per-mouse DataFrame.
+    """
+    if per_trial_df.empty:
+        return pd.DataFrame()
+    df = per_trial_df[per_trial_df["group"].isin(["lick", "withhold"])].copy()
+    df = df[np.isfinite(df["scalar"].astype(float))]
+    out = []
+    for (subj, geno, region), g in df.groupby(["subject_id", "genotype", "region"]):
+        lick = g[g["group"] == "lick"]["scalar"].to_numpy(dtype=float)
+        wh = g[g["group"] == "withhold"]["scalar"].to_numpy(dtype=float)
+        if lick.size < min_n or wh.size < min_n:
+            continue
+        scores = np.concatenate([wh, lick])
+        labels = np.concatenate([np.ones(wh.size), np.zeros(lick.size)])
+        out.append({"subject_id": subj, "genotype": geno, "region": region,
+                    "n_lick": int(lick.size), "n_withhold": int(wh.size),
+                    "delta": float(np.mean(wh) - np.mean(lick)),
+                    "auroc": auroc_score(scores, labels)})
+    return pd.DataFrame(out)
+
+
+def run_suppression_stats(per_mouse_df):
+    """(pushpull_df, auroc_df) over per-mouse values, per region.
+
+    pushpull_df: D1-vs-D2 group-level sign contrast on `delta`.
+    auroc_df: per genotype x region, bootstrap CI of AUROC (vs chance 0.5) plus
+              D1-vs-D2 permutation p.
+    """
+    if per_mouse_df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    pp_rows = []
+    for region, grp in per_mouse_df.groupby("region"):
+        d1 = grp[grp["genotype"] == "D1"]["delta"].to_numpy(dtype=float)
+        d2 = grp[grp["genotype"] == "D2"]["delta"].to_numpy(dtype=float)
+        res = pushpull_sign_contrast(d1, d2)
+        res.update({"region": region, "metric": "delta"})
+        pp_rows.append(res)
+
+    au_rows = []
+    for region, grp in per_mouse_df.groupby("region"):
+        d1a = grp[grp["genotype"] == "D1"]["auroc"].to_numpy(dtype=float)
+        d1a = d1a[np.isfinite(d1a)]
+        d2a = grp[grp["genotype"] == "D2"]["auroc"].to_numpy(dtype=float)
+        d2a = d2a[np.isfinite(d2a)]
+        perm_p = (permutation_test(d1a, d2a)["p"]
+                  if d1a.size >= 2 and d2a.size >= 2 else np.nan)
+        for geno, vals in (("D1", d1a), ("D2", d2a)):
+            ci = bootstrap_ci(vals) if vals.size >= 2 else {"observed": np.nan,
+                                                            "ci_lo": np.nan, "ci_hi": np.nan}
+            au_rows.append({"region": region, "genotype": geno, "n_mice": int(vals.size),
+                            "auroc_mean": ci["observed"], "ci_lo": ci["ci_lo"],
+                            "ci_hi": ci["ci_hi"],
+                            "excludes_chance": bool(np.isfinite(ci["ci_lo"]) and
+                                                    (ci["ci_lo"] > 0.5 or ci["ci_hi"] < 0.5)),
+                            "perm_p_d1_vs_d2": perm_p})
+    return pd.DataFrame(pp_rows), pd.DataFrame(au_rows)
