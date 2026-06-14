@@ -154,3 +154,14 @@ TF_CHANGE_VALIDATE_TOL = 0.05          # 50 ms mismatch tolerance
 TRF_LAG_MIN = -0.5
 TRF_LAG_MAX = 2.0
 TRF_LAG_STEP = 0.05
+
+# ── C1 waiting-period (FA suppression) windows ────────────────
+SCHEME1_WINDOW        = (2.0, 3.0)  # (w0, w0+L) s after grating onset (clean late-waiting)
+SCHEME1_MOTOR_BUFFER  = 1.0         # s; Scheme-1 window must end this long before an action
+SCHEME3_L             = 1.0         # s; Scheme-3 window length
+SCHEME3_BUFFER        = 0.5         # s; Scheme-3 motor-execution guard before the action
+HAZARD_RESAMPLES      = 20          # withhold pseudo-action-time draws (Scheme 3)
+HAZARD_SEED           = 42
+MIN_TRIALS_PER_GROUP  = 8           # min finite scalars per (mouse, region, group) cell
+PROF_MIN_SESSIONS     = 3           # min sessions per staging bin to use the staging split
+WINDOW_MIN_SAMPLES    = 3           # min finite samples for a window-mean to be valid

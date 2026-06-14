@@ -408,3 +408,23 @@ def pushpull_sign_contrast(d1_vals, d2_vals, n_perm=10000, seed=42):
         out["p"] = np.nan
         out["rank_biserial_r"] = np.nan
     return out
+
+
+# ── AUROC (single-trial discriminability) ────────────────────
+
+def auroc_score(scores, labels) -> float:
+    """Area under ROC for score discriminating positive class (label==1) from
+    negative (label==0). AUROC = P(score_pos > score_neg) via the Mann-Whitney U
+    statistic: U / (n_pos * n_neg). Non-finite scores are dropped. Returns NaN if
+    either class is empty.
+    """
+    scores = np.asarray(scores, dtype=float)
+    labels = np.asarray(labels)
+    pos = scores[labels == 1]
+    neg = scores[labels == 0]
+    pos = pos[np.isfinite(pos)]
+    neg = neg[np.isfinite(neg)]
+    if pos.size == 0 or neg.size == 0:
+        return np.nan
+    U, _ = sp_stats.mannwhitneyu(pos, neg, alternative="two-sided")
+    return float(U / (pos.size * neg.size))
