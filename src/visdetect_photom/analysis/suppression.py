@@ -10,11 +10,12 @@ contrast, never within-animal anticorrelation.
 """
 import numpy as np
 import pandas as pd
+from collections import defaultdict
 
 from visdetect_photom.core.constants import (
     CATCH_THRESHOLD, WINDOW_MIN_SAMPLES, SCHEME1_WINDOW, SCHEME1_MOTOR_BUFFER,
     SCHEME3_L, SCHEME3_BUFFER, HAZARD_RESAMPLES, HAZARD_SEED,
-    MIN_TRIALS_PER_GROUP,
+    MIN_TRIALS_PER_GROUP, PROF_MIN_SESSIONS,
 )
 from visdetect_photom.analysis.group_statistics import (
     auroc_score, bootstrap_ci, permutation_test, pushpull_sign_contrast,
@@ -303,3 +304,49 @@ def run_suppression_stats(per_mouse_df):
                                                     (ci["ci_lo"] > 0.5 or ci["ci_hi"] < 0.5)),
                             "perm_p_d1_vs_d2": perm_p})
     return pd.DataFrame(pp_rows), pd.DataFrame(au_rows)
+
+
+def assign_proficiency_bins(sessions, manifest=None,
+                            min_sessions=PROF_MIN_SESSIONS):
+    """Map session_id -> 'less' | 'more' | None.
+
+    Per subject: if the staging manifest gives >= min_sessions Learning AND
+    >= min_sessions Expert sessions, use Learning='less' / Expert='more' (other
+    stages -> None). Otherwise fall back to a within-subject early-vs-late split
+    by session_date (earlier half 'less', later half 'more'; a lone session ->
+    None).
+    """
+    by_subject = defaultdict(list)
+    for s in sessions:
+        by_subject[_subject_full(s.subject_id)].append(s)
+
+    bins = {}
+    for subj, subj_sessions in by_subject.items():
+        stages = {s.session_id: get_session_stage(s, manifest) for s in subj_sessions}
+        n_learn = sum(v == "Learning" for v in stages.values())
+        n_expert = sum(v == "Expert" for v in stages.values())
+        if n_learn >= min_sessions and n_expert >= min_sessions:
+            for sid, st in stages.items():
+                bins[sid] = "less" if st == "Learning" else ("more" if st == "Expert" else None)
+            continue
+        ordered = sorted(subj_sessions, key=lambda s: str(s.session_date))
+        n = len(ordered)
+        if n < 2:
+            for s in ordered:
+                bins[s.session_id] = None
+            continue
+        half = n // 2
+        for i, s in enumerate(ordered):
+            bins[s.session_id] = "less" if i < half else "more"
+    return bins
+
+
+def session_d_prime(session):
+    """Per-session SDT d' (go/catch by change_size), or NaN. Reporting only."""
+    from visdetect_photom.analysis.statistics import calculate_sdt_metrics
+    outcomes = np.array([t.outcome for t in session.trials])
+    change_sizes = np.array([t.change_size if t.change_size is not None else np.nan
+                             for t in session.trials], dtype=float)
+    if outcomes.size == 0:
+        return np.nan
+    return calculate_sdt_metrics(outcomes, change_sizes).get("d_prime", np.nan)
