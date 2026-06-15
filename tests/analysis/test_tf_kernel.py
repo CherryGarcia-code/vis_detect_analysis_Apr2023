@@ -42,6 +42,33 @@ def test_build_region_design_returns_segments():
     assert segs[0][0].size == segs[0][1].size and segs[0][0].size > 50
 
 
+def test_build_region_design_counts():
+    onset = 100.0
+    st1 = np.repeat(np.ones(200), 3).tolist()
+    good_tr = SimpleNamespace(trial_index=0, outcome="Hit", change_time=8.0, iti_duration=2.0,
+                              reaction_time=0.5, change_size=2.0, absolute_change_time=108.0,
+                              absolute_reaction_time=108.5, metadata={"St1TrialVector": st1, "Stim2TF": 2.0})
+    # change_time=1.5 -> usable window [onset+1.0, onset+0.5] is empty -> n_empty_window
+    empty_tr = SimpleNamespace(trial_index=1, outcome="Hit", change_time=1.5, iti_duration=2.0,
+                               reaction_time=0.5, change_size=2.0, absolute_change_time=101.5,
+                               absolute_reaction_time=102.0, metadata={"St1TrialVector": st1, "Stim2TF": 2.0})
+    sess = SimpleNamespace(trials=[good_tr, empty_tr])
+    ts = np.arange(95.0, 115.0, 0.01)
+    sig = np.sin(ts)
+    segs, counts = build_region_design(sess, sig, ts, validate=False, return_counts=True)
+    assert len(segs) == 1
+    assert counts["n_seen"] == 2
+    assert counts["n_kept"] == 1
+    assert counts["n_empty_window"] == 1
+    assert counts["n_pulses"] == segs[0][0].size
+    # backward compat: default returns just the list
+    segs_only = build_region_design(sess, sig, ts, validate=False)
+    assert isinstance(segs_only, list) and len(segs_only) == 1
+    # state_keep filters trials out of n_seen
+    _, counts2 = build_region_design(sess, sig, ts, validate=False, return_counts=True, state_keep={1})
+    assert counts2["n_seen"] == 1 and counts2["n_kept"] == 0 and counts2["n_empty_window"] == 1
+
+
 def test_kernel_timescale_peak():
     lags = lag_grid()
     k = np.zeros_like(lags); k[np.argmin(np.abs(lags - 0.3))] = 2.0

@@ -14,30 +14,45 @@ def lag_grid():
     return np.round(np.linspace(TRF_LAG_MIN, TRF_LAG_MAX, n), 6)
 
 
-def build_region_design(session, signal, timestamps, *, state_keep=None, validate=True):
+def build_region_design(session, signal, timestamps, *, state_keep=None, validate=True,
+                        return_counts=False):
     """Return list of (x_seg, y_seg) per valid baseline window (50 ms grid).
 
     x_seg = log2(TF), y_seg = dF/F interpolated onto the pulse times. Segments are
     kept separate so the lag embedding never crosses trial boundaries.
+
+    If return_counts is True, also return a per-trial disposition dict
+    (n_seen / n_validate_drop / n_empty_window / n_too_short / n_kept / n_pulses)
+    for effective-N / alignment-QC reporting.
     """
     timestamps = np.asarray(timestamps, float)
     signal = np.asarray(signal, float)
     segments = []
+    counts = {"n_seen": 0, "n_validate_drop": 0, "n_empty_window": 0,
+              "n_too_short": 0, "n_kept": 0, "n_pulses": 0}
     for t in session.trials:
         if state_keep is not None and t.trial_index not in state_keep:
             continue
+        counts["n_seen"] += 1
         if validate:
             ok, mism = validate_change_anchor(t)
             if (ok is False) and np.isfinite(mism):
+                counts["n_validate_drop"] += 1
                 continue
         l2, times = aligned_baseline_regressor(t)
         if l2.size == 0:
+            counts["n_empty_window"] += 1
             continue
         dff = np.interp(times, timestamps, signal, left=np.nan, right=np.nan)
         good = np.isfinite(dff) & np.isfinite(l2)
         if good.sum() <= 1:
+            counts["n_too_short"] += 1
             continue
         segments.append((l2[good], dff[good]))
+        counts["n_kept"] += 1
+        counts["n_pulses"] += int(good.sum())
+    if return_counts:
+        return segments, counts
     return segments
 
 
@@ -72,21 +87,30 @@ def fit_trf(segments, lags=None, alpha=None):
     lag_s = np.round(lags / TF_SAMPLE_PERIOD).astype(int)
     smin, smax = int(lag_s.min()), int(lag_s.max())
 
-    X_rows, y_rows = [], []
+    # Build the lag-embedded design per segment (vectorized; never crosses trial
+    # boundaries). Equivalent to the row-by-row form but fast enough for the pooled
+    # shuffle-null (hundreds of refits on large pooled designs).
+    X_blocks, y_blocks = [], []
     for x_seg, y_seg in segments:
+        x_seg = np.asarray(x_seg, float)
+        y_seg = np.asarray(y_seg, float)
         L = len(x_seg)
         i_lo = max(0, smax)
         i_hi = min(L, L + smin)  # i <= L-1+smin
-        for i in range(i_lo, i_hi):
-            row = x_seg[i - lag_s]
-            if np.all(np.isfinite(row)) and np.isfinite(y_seg[i]):
-                X_rows.append(row)
-                y_rows.append(y_seg[i])
-    if not X_rows:
+        if i_hi <= i_lo:
+            continue
+        idxs = np.arange(i_lo, i_hi)
+        rows = x_seg[idxs[:, None] - lag_s[None, :]]   # (n_rows, n_lags)
+        yv = y_seg[idxs]
+        finite = np.all(np.isfinite(rows), axis=1) & np.isfinite(yv)
+        if finite.any():
+            X_blocks.append(rows[finite])
+            y_blocks.append(yv[finite])
+    if not X_blocks:
         return lags, np.full(len(lags), np.nan)
 
-    X = np.asarray(X_rows, float)
-    y = np.asarray(y_rows, float)
+    X = np.vstack(X_blocks)
+    y = np.concatenate(y_blocks)
     X = X - X.mean(axis=0, keepdims=True)
     y = y - y.mean()
     if alpha is None:
