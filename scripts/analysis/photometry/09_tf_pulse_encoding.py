@@ -144,6 +144,9 @@ def main():
     ap.add_argument("--max_sessions", type=int, default=None)
     ap.add_argument("--n-shuffles", type=int, default=200,
                     help="circular-shift resamples for the pooled shuffle-null band")
+    ap.add_argument("--pooled-max-seg", type=int, default=5000,
+                    help="cap on pooled segments for the existence-test kernel+null; point "
+                         "and null share this sample size (coherent band, bounded runtime)")
     ap.add_argument("--validate-anchor", action="store_true", default=False,
                     help="re-enable the change-anchor gate (OFF by default: it cancels the "
                          "photometry onset algebraically and its 50ms tolerance is below the "
@@ -188,17 +191,25 @@ def main():
         logging.info(f"Effective-N (trials summed over sessions):\n{agg}")
 
     # ── pooled existence kernel + shuffle-null band per (genotype, region) ──
-    pooled = {}  # (geno, region) -> {kernel, lo, hi, peak_lag, n_seg}
+    pooled = {}  # (geno, region) -> {kernel, lo, hi, peak_lag, n_seg, n_total}
+    _prng = np.random.default_rng(42)
     for region in regions:
         for geno in ("D1", "D2"):
             segs = seg_pool.get((geno, region), [])
-            if len(segs) < 2:
+            n_total = len(segs)
+            if n_total < 2:
                 continue
-            _, pk = fit_trf(segs, lags=lags)
-            _, lo, hi = shuffle_null(segs, lags=lags, n_shuffles=args.n_shuffles)
+            # Cap segments for the existence test so the pooled kernel AND its null
+            # share one sample size (coherent band) and runtime stays bounded as data grows.
+            use_segs = segs
+            if n_total > args.pooled_max_seg:
+                idx = _prng.choice(n_total, args.pooled_max_seg, replace=False)
+                use_segs = [segs[i] for i in idx]
+            _, pk = fit_trf(use_segs, lags=lags)
+            _, lo, hi = shuffle_null(use_segs, lags=lags, n_shuffles=args.n_shuffles)
             pooled[(geno, region)] = {"kernel": pk, "lo": lo, "hi": hi,
                                       "peak_lag": kernel_timescale(lags, pk)["peak_lag"],
-                                      "n_seg": len(segs)}
+                                      "n_seg": len(use_segs), "n_total": n_total}
 
     # ── per-mouse kernel summary (incl. amplitude at the pooled peak lag, item 4) ──
     rows, stat_rows = [], []
@@ -259,7 +270,9 @@ def main():
             if pj is None:
                 continue
             c = GENOTYPE_COLORS[geno]
-            ax.plot(lags, pj["kernel"], color=c, lw=1.6, label=f"{geno} pooled ({pj['n_seg']} seg)")
+            seg_lbl = (f"{pj['n_seg']}/{pj['n_total']}" if pj["n_total"] > pj["n_seg"]
+                       else f"{pj['n_seg']}")
+            ax.plot(lags, pj["kernel"], color=c, lw=1.6, label=f"{geno} pooled ({seg_lbl} seg)")
             ax.fill_between(lags, pj["lo"], pj["hi"], color=c, alpha=0.15)
         ax.axvline(0, color="k", ls="--", lw=0.8, alpha=0.6); ax.axhline(0, color="grey", lw=0.5, alpha=0.4)
         ax.set_xlabel("Lag (s): TF → dF/F"); ax.set_ylabel("pooled kernel weight")
