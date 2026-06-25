@@ -284,11 +284,16 @@ def extract_onset_latency(trace: np.ndarray, time_axis: np.ndarray,
                            search_window: Tuple[float, float] = (0.0, 2.0),
                            n_consecutive: int = 3) -> float:
     """
-    Extract onset latency: first time the trace exceeds threshold_n_std * baseline_std
-    for n_consecutive bins after event onset.
+    Extract onset latency: first time the trace's absolute deviation from the
+    baseline mean exceeds threshold_n_std * baseline_std for n_consecutive bins
+    within the search window.
+
+    The crossing test is TWO-SIDED — it triggers on |trace - baseline_mean| >
+    threshold_n_std * baseline_std — so it catches suppression (negative
+    deflections) as well as activation.
 
     This is robust to amplitude scaling — it only asks "when does the signal
-    first reliably deviate from baseline?"
+    first reliably deviate from baseline (in either direction)?"
     """
     bl_mask = (time_axis >= baseline_window[0]) & (time_axis <= baseline_window[1])
     search_mask = (time_axis >= search_window[0]) & (time_axis <= search_window[1])
@@ -302,11 +307,11 @@ def extract_onset_latency(trace: np.ndarray, time_axis: np.ndarray,
     if bl_std < 1e-6:
         return np.nan
 
-    threshold = bl_mean + threshold_n_std * bl_std
     search_trace = trace[search_mask]
     search_times = time_axis[search_mask]
 
-    # Find first stretch of n_consecutive bins above threshold
+    # Two-sided crossing: first stretch of n_consecutive bins whose absolute
+    # deviation from baseline exceeds threshold_n_std * baseline_std.
     above = np.abs(search_trace - bl_mean) > (threshold_n_std * bl_std)
     above[~np.isfinite(search_trace)] = False
 
