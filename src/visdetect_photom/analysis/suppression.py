@@ -106,16 +106,18 @@ def scheme1_scalar(record, signal, timestamps,
     """Baseline-onset-anchored fixed-window mean for one trial, or NaN if excluded.
 
     Window [onset+w0, onset+w1]. Excluded unless it ends strictly before the
-    change (change_time > w1); for action groups (lick/abort) it must also end
-    motor_buffer before the action (lick_elapsed >= w1 + motor_buffer).
+    change (change_time > w1). The motor buffer is enforced symmetrically against
+    ANY trial's actual lick/action time: whenever the trial has a finite action
+    elapsed time (FA/abort licks AND withhold-Hit response licks), the window must
+    end motor_buffer before it (lick_elapsed >= w1 + motor_buffer). Trials with no
+    action (Miss/CR withhold) keep only the change-coincidence exclusion.
     """
     w0, w1 = window
     if record["change_time"] is None or record["change_time"] <= w1:
         return np.nan
-    if record["group"] in _ACTION_GROUPS:
-        le = record["lick_elapsed"]
-        if not np.isfinite(le) or le < w1 + motor_buffer:
-            return np.nan
+    le = record["lick_elapsed"]
+    if np.isfinite(le) and le < w1 + motor_buffer:
+        return np.nan
     t0 = record["onset_abs"] + w0
     t1 = record["onset_abs"] + w1
     return window_mean(signal, timestamps, t0, t1)
