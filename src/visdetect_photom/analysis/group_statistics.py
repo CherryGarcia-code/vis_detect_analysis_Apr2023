@@ -121,7 +121,10 @@ def spearman_with_ci(x: np.ndarray, y: np.ndarray,
         idx = rng.integers(0, n, size=n)
         boot_rhos[i] = sp_stats.spearmanr(x[idx], y[idx]).statistic
 
-    ci_lo, ci_hi = np.percentile(boot_rhos, [2.5, 97.5])
+    # nanpercentile: constant resamples (common at small n) yield NaN spearmanr
+    # replicates; plain percentile would propagate NaN to both CI bounds even
+    # though the point estimate rho is finite.
+    ci_lo, ci_hi = np.nanpercentile(boot_rhos, [2.5, 97.5])
 
     return {"rho": float(rho), "p": float(p),
             "ci_lo": float(ci_lo), "ci_hi": float(ci_hi), "n": n}
