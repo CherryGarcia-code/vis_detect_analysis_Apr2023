@@ -403,7 +403,10 @@ def pushpull_sign_contrast(d1_vals, d2_vals, n_perm=10000, seed=42):
 
     if d1.size >= 2 and d2.size >= 2:
         out["p"] = permutation_test(d1, d2, n_perm=n_perm, seed=seed)["p"]
-        out["rank_biserial_r"] = mannwhitney_with_effect_size(d1, d2)["rank_biserial_r"]
+        # Negate so a POSITIVE rank_biserial_r means D1>D2, agreeing in sign with
+        # (d1_mean - d2_mean). mannwhitney_with_effect_size uses r = 1 - 2U/(n1*n2)
+        # with scipy's U1 (counting d1>d2 pairs), which is negative when D1>D2.
+        out["rank_biserial_r"] = -mannwhitney_with_effect_size(d1, d2)["rank_biserial_r"]
     else:
         out["p"] = np.nan
         out["rank_biserial_r"] = np.nan
