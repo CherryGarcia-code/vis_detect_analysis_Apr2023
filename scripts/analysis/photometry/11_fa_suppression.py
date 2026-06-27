@@ -148,7 +148,7 @@ def main():
                 state_provider=state_provider, keep_states=keep_states, manifest=manifest)
             if df.empty:
                 continue
-            df["prof_bin"] = df["session_id"].map(prof_bins)
+            df["prof_bin"] = df["recording_id"].map(prof_bins)
             all_trials.append(df)
 
             # pooled (primary)

@@ -48,12 +48,24 @@ class Session:
     """Represents a complete recording session."""
     subject_id: str
     session_date: str # YYYY-MM-DD
-    session_id: str   # Unique identifier
+    session_id: str   # Date-granular key ("{subject}_{date}"); matches staging manifest.
+                      # NOT unique when a subject has >1 recording on the same day.
+    # Unique-per-recording identifier (carries the HH_MM_SS time from the trials
+    # file). Use this — not session_id — as the per-recording grouping unit, so
+    # same-day recordings don't collide. Falls back to session_id if no
+    # per-recording info is available. Set by load_session_from_files().
+    recording_id: str = ""
     trials: List[Trial] = field(default_factory=list)
     photometry_data: Dict[str, PhotometryTrace] = field(default_factory=dict)
     behavior_data: Optional[pd.DataFrame] = None # Full behavioral dataframe if needed
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
+    def __post_init__(self):
+        # Guarantee a non-empty unique-per-recording id; fall back to the
+        # (date-granular) session_id only when no finer info is supplied.
+        if not self.recording_id:
+            self.recording_id = self.session_id
+
     @property
     def trial_outcomes(self) -> List[str]:
         return [t.outcome for t in self.trials]
@@ -116,6 +128,17 @@ def load_session_from_files(file_paths: Dict[str, str]) -> Session:
     if not subject_id: subject_id = "Unknown"
     if not session_date_str: session_date_str = "Unknown"
     session_id = f"{subject_id}_{session_date_str}"
+
+    # Unique-per-recording id derived from the trials basename, which carries the
+    # full HH_MM_SS timestamp (e.g. BG_013_20231201_090000__trials.json ->
+    # BG_013_20231201_090000). Two recordings on the same calendar day share a
+    # session_id but get distinct recording_ids. Fall back to session_id if the
+    # basename gives nothing usable.
+    import os as _os
+    _trials_base = _os.path.basename(trials_path)
+    recording_id = _trials_base.split("__")[0] if "__" in _trials_base else ""
+    if not recording_id:
+        recording_id = session_id
 
     # Load Data
     trials_data = io.load_json_data(trials_path)
@@ -266,6 +289,7 @@ def load_session_from_files(file_paths: Dict[str, str]) -> Session:
         subject_id=subject_id,
         session_date=session_date_str,
         session_id=session_id,
+        recording_id=recording_id,
         trials=trials_list,
         photometry_data=photom_traces,
         metadata={"file_paths": file_paths}

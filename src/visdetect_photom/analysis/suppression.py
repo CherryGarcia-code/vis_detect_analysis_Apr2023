@@ -173,7 +173,8 @@ def scheme3_scalars(action_records, withhold_records, signal, timestamps,
 
 
 _DATASET_COLUMNS = ["subject_id", "genotype", "region", "track", "scheme",
-                    "group", "trial_index", "scalar", "session_id", "stage"]
+                    "group", "trial_index", "scalar", "session_id",
+                    "recording_id", "stage"]
 
 
 def build_session_scalars(session, *, track, scheme, use_qc=True,
@@ -181,7 +182,9 @@ def build_session_scalars(session, *, track, scheme, use_qc=True,
     """Per-trial waiting-period scalar rows for one session (one track, one scheme).
 
     Row keys: subject_id, genotype, region, track, scheme, group, trial_index,
-              scalar, session_id, stage.
+              scalar, session_id, recording_id, stage. recording_id is the
+              unique-per-recording grouping unit (session_id is date-granular and
+              collides across same-day recordings).
     """
     subject_full = _subject_full(session.subject_id)
     genotype = get_genotype(subject_full)
@@ -196,12 +199,14 @@ def build_session_scalars(session, *, track, scheme, use_qc=True,
     sources = region_sources(session, use_qc)
     rows = []
 
+    recording_id = _recording_id(session)
+
     def _emit(region, group, trial_index, scalar):
         rows.append({"subject_id": subject_full, "genotype": genotype,
                      "region": region, "track": track, "scheme": scheme,
                      "group": group, "trial_index": trial_index,
                      "scalar": scalar, "session_id": session.session_id,
-                     "stage": stage})
+                     "recording_id": recording_id, "stage": stage})
 
     for region, (sig, ts) in sources.items():
         if scheme == "scheme1":
@@ -308,16 +313,27 @@ def run_suppression_stats(per_mouse_df):
     return pd.DataFrame(pp_rows), pd.DataFrame(au_rows)
 
 
+def _recording_id(session):
+    """Unique-per-recording id, falling back to the date-granular session_id."""
+    return getattr(session, "recording_id", None) or session.session_id
+
+
 def assign_proficiency_bins(sessions, manifest=None,
                             min_sessions=PROF_MIN_SESSIONS):
-    """Map session_id -> 'less' | 'more' | None.
+    """Map recording_id -> 'less' | 'more' | None.
+
+    Keyed by recording_id (NOT session_id) so that >1 recording on the same
+    calendar day — which share a date-granular session_id — are counted and
+    binned INDEPENDENTLY instead of collapsing/overwriting each other.
 
     Per subject: if the staging manifest gives >= min_sessions Learning AND
-    >= min_sessions Expert sessions, use Learning='less' / Expert='more' (other
-    stages -> None). Otherwise fall back to a within-subject early-vs-late split
-    by session_date (earlier half 'less', later half 'more'). The fallback also
-    enforces the per-bin floor: it requires >= min_sessions on EACH side of the
-    split (n >= 2*min_sessions), otherwise all of the subject's sessions -> None.
+    >= min_sessions Expert recordings, use Learning='less' / Expert='more' (other
+    stages -> None). Stage is resolved via get_session_stage (session_id-based:
+    same-day recordings correctly share a stage). Otherwise fall back to a
+    within-subject early-vs-late split ordered by (session_date, recording_id)
+    for determinism. The fallback also enforces the per-bin floor: it requires
+    >= min_sessions recordings on EACH side of the split (n >= 2*min_sessions),
+    otherwise all of the subject's recordings -> None.
     """
     by_subject = defaultdict(list)
     for s in sessions:
@@ -325,22 +341,25 @@ def assign_proficiency_bins(sessions, manifest=None,
 
     bins = {}
     for subj, subj_sessions in by_subject.items():
-        stages = {s.session_id: get_session_stage(s, manifest) for s in subj_sessions}
+        # Key by recording_id so same-day recordings are independent entries.
+        stages = {_recording_id(s): get_session_stage(s, manifest)
+                  for s in subj_sessions}
         n_learn = sum(v == "Learning" for v in stages.values())
         n_expert = sum(v == "Expert" for v in stages.values())
         if n_learn >= min_sessions and n_expert >= min_sessions:
-            for sid, st in stages.items():
-                bins[sid] = "less" if st == "Learning" else ("more" if st == "Expert" else None)
+            for rid, st in stages.items():
+                bins[rid] = "less" if st == "Learning" else ("more" if st == "Expert" else None)
             continue
-        ordered = sorted(subj_sessions, key=lambda s: str(s.session_date))
+        ordered = sorted(subj_sessions,
+                         key=lambda s: (str(s.session_date), _recording_id(s)))
         n = len(ordered)
         if n < 2 * min_sessions:
             for s in ordered:
-                bins[s.session_id] = None
+                bins[_recording_id(s)] = None
             continue
         half = n // 2
         for i, s in enumerate(ordered):
-            bins[s.session_id] = "less" if i < half else "more"
+            bins[_recording_id(s)] = "less" if i < half else "more"
     return bins
 
 
