@@ -43,8 +43,10 @@ def test_change_hit_activation_positive():
 
 
 from visdetect_photom.analysis.geometry import (
-    build_geometry_dataset, run_pushpull_tests,
+    build_geometry_dataset, run_pushpull_tests, run_grading,
 )
+import pandas as pd
+from visdetect_photom.core.constants import CHANGE_SIZES
 
 
 def _d2_session():
@@ -78,3 +80,47 @@ def test_pushpull_opposite_sign_d1_vs_d2():
     stats = run_pushpull_tests(df, metric="signed_auc")
     row = stats[(stats["region"] == "DMS") & (stats["epoch"] == "change_hit")].iloc[0]
     assert row["d1_sign"] == 1 and row["d2_sign"] == -1
+
+
+def _graded_per_mouse_df(subjects, change_sizes, *, genotype="D1", region="DMS",
+                         slope=1.0, base=0.5):
+    """Mirror build_geometry_dataset output: one graded row per (subject, change_size).
+
+    signed_auc rises monotonically with change_size for every mouse, so each
+    mouse's per-mouse Spearman rho is +1.
+    """
+    rows = []
+    for si, subj in enumerate(subjects):
+        for cs in change_sizes:
+            rows.append({
+                "subject_id": subj, "genotype": genotype, "region": region,
+                "epoch": "change_hit_graded", "change_size": float(cs),
+                "signed_auc": base + slope * np.log2(cs) + 0.01 * si,
+            })
+    return pd.DataFrame(rows)
+
+
+def test_run_grading_n_is_mice_not_rows():
+    # 3 mice, each with all 5 change-size graded rows -> N must be 3, not 15
+    subjects = ["BG_013", "BG_014", "BG_020"]
+    df = _graded_per_mouse_df(subjects, CHANGE_SIZES, genotype="D1", region="DMS")
+    grading = run_grading(df, metric="signed_auc")
+    assert len(grading) == 1
+    row = grading.iloc[0]
+    assert row["genotype"] == "D1" and row["region"] == "DMS"
+    assert row["metric"] == "signed_auc"
+    assert int(row["n_mice"]) == 3            # mice, NOT 15 within-mouse points
+    # each mouse is perfectly monotone -> per-mouse rho == +1 -> mean == +1
+    assert np.isfinite(row["mean_rho"]) and abs(row["mean_rho"] - 1.0) < 1e-9
+    assert np.isfinite(row["ci_lo"]) and np.isfinite(row["ci_hi"])
+    # no leftover pooled-Spearman column from the old (buggy) schema
+    assert "rho" not in grading.columns
+    assert "n" not in grading.columns
+
+
+def test_run_grading_excludes_mice_with_too_few_levels():
+    # Every mouse has only 2 distinct change sizes -> no mouse qualifies -> no row
+    subjects = ["BG_013", "BG_014", "BG_020"]
+    df = _graded_per_mouse_df(subjects, CHANGE_SIZES[:2], genotype="D1", region="DMS")
+    grading = run_grading(df, metric="signed_auc")
+    assert grading.empty

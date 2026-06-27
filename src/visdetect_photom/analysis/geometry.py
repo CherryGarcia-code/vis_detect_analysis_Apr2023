@@ -190,8 +190,9 @@ def compute_geometry_metrics_for_session(session, *, use_qc=True,
 
 
 import pandas as pd
+from scipy import stats as sp_stats
 from visdetect_photom.analysis.group_statistics import (
-    pushpull_sign_contrast, spearman_with_ci,
+    pushpull_sign_contrast, bootstrap_ci,
 )
 
 
@@ -257,18 +258,35 @@ def run_pushpull_tests(per_mouse_df, metric="signed_auc"):
 
 
 def run_grading(per_mouse_df, metric="signed_auc"):
-    """Spearman(metric, log2(change_size)) per genotype x region over graded rows."""
+    """Change-size grading per genotype x region, aggregated across MICE (N=mice).
+
+    For each mouse with >= 3 distinct change_size levels, compute that mouse's
+    grading slope rho_i = Spearman(log2(change_size), metric) over its graded
+    rows. Then per (genotype, region) report n_mice, mean_rho (mean of rho_i),
+    and a bootstrap CI over the per-mouse rho_i. This avoids the previous
+    pseudo-replication where one pooled Spearman treated mice x change_size
+    within-mouse points as if independent.
+    """
     if per_mouse_df.empty:
         return pd.DataFrame()
     graded = per_mouse_df[per_mouse_df["epoch"] == "change_hit_graded"].dropna(
         subset=["change_size", metric])
     out = []
     for (geno, region), grp in graded.groupby(["genotype", "region"]):
-        if grp["change_size"].nunique() < 3:
+        rhos = []
+        for _subj, mgrp in grp.groupby("subject_id"):
+            if mgrp["change_size"].nunique() < 3:
+                continue
+            x = np.log2(mgrp["change_size"].values.astype(float))
+            y = mgrp[metric].values.astype(float)
+            rho_i = sp_stats.spearmanr(x, y).statistic
+            if np.isfinite(rho_i):
+                rhos.append(float(rho_i))
+        if not rhos:
             continue
-        x = np.log2(grp["change_size"].values.astype(float))
-        y = grp[metric].values.astype(float)
-        res = spearman_with_ci(x, y)
-        res.update({"genotype": geno, "region": region, "metric": metric})
-        out.append(res)
+        rho_arr = np.asarray(rhos, dtype=float)
+        ci = bootstrap_ci(rho_arr)
+        out.append({"genotype": geno, "region": region, "metric": metric,
+                    "n_mice": len(rhos), "mean_rho": float(np.mean(rho_arr)),
+                    "ci_lo": ci["ci_lo"], "ci_hi": ci["ci_hi"]})
     return pd.DataFrame(out)
