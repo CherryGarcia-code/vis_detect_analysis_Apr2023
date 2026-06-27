@@ -74,3 +74,28 @@ def load_cohort_sessions(cohort_name, root_dir, max_sessions=None):
         sessions.append(sess)
         n += 1
     return sessions
+
+def summarize_sessions_by_cell(per_session_df, value_cols=("delta", "auroc"),
+                               cell_keys=("subject_id", "genotype", "region")):
+    """Per cell: bootstrap CI of each value col over that cell's per-session values.
+
+    This is the within-animal session-unit summary for the n=1-mouse/cell cohort.
+    """
+    import numpy as np
+    import pandas as pd
+    from visdetect_photom.analysis.group_statistics import bootstrap_ci
+    if per_session_df is None or per_session_df.empty:
+        return pd.DataFrame()
+    cell_keys = list(cell_keys)
+    out = []
+    for key, g in per_session_df.groupby(cell_keys):
+        row = dict(zip(cell_keys, key if isinstance(key, tuple) else (key,)))
+        row["n_sessions"] = int(len(g))
+        for col in value_cols:
+            vals = g[col].to_numpy(dtype=float)
+            ci = bootstrap_ci(vals)
+            row[f"{col}_mean"] = ci["observed"]
+            row[f"{col}_ci_lo"] = ci["ci_lo"]
+            row[f"{col}_ci_hi"] = ci["ci_hi"]
+        out.append(row)
+    return pd.DataFrame(out)
