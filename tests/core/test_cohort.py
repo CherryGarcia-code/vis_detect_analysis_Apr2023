@@ -29,3 +29,36 @@ def test_summarize_sessions_by_cell_bootstraps_over_sessions():
 def pytest_approx(x):  # tiny local helper to avoid extra import noise
     import pytest
     return pytest.approx(x, rel=1e-6)
+
+
+import pytest
+from visdetect_photom.core.cohort import match_cohort_cells, assert_rank_based
+
+def test_match_cohort_cells_pairs_by_genotype_region():
+    m = match_cohort_cells("D2", "DMS")
+    assert m["intersectional"] == ["BG_029"]
+    assert set(m["bulk"]) == {"BG_016", "BG_018", "BG_019"}
+    m2 = match_cohort_cells("D1", "VMS")
+    assert m2["intersectional"] == ["BG_027"]
+    assert set(m2["bulk"]) == {"BG_008", "BG_009"}
+
+def test_assert_rank_based_refuses_magnitude():
+    assert_rank_based("auroc")            # ok
+    with pytest.raises(ValueError):
+        assert_rank_based("signed_auc")   # a magnitude metric -> refused across indicators
+
+
+from visdetect_photom.analysis.group_utils import get_genotype
+from visdetect_photom.core.constants import get_roi_region
+from visdetect_photom.core.qc import get_region_pairs_for_subject
+
+def test_cohort_genotype_and_region_maps():
+    assert get_genotype("BG_027") == "D1" and get_genotype("BG_028") == "D1"
+    assert get_genotype("BG_029") == "D2" and get_genotype("BG_030") == "D2"
+    assert get_roi_region("G0", "BG_027") == "VMS_L"   # 027/030 = VMS
+    assert get_roi_region("G2", "BG_030") == "VMS_R"
+    assert get_roi_region("G0", "BG_028") == "DMS_L"   # 028/029 = DMS
+    # G0/G2 map to the cell's region; (G4/G5 default to a VLS pair for every
+    # G0/G2 mouse — harmless, the pipeline only extracts regions with real data).
+    assert get_region_pairs_for_subject("BG_027")["VMS"] == ("G0", "G2")
+    assert get_region_pairs_for_subject("BG_029")["DMS"] == ("G0", "G2")

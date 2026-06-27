@@ -68,6 +68,11 @@ SUBJECT_ROI_REGION = {
     'BG_009': {'G0': 'VMS_L', 'G2': 'VMS_R'},
     'BG_010': {'G0': 'VMS_L', 'G2': 'VMS_R'},
     'BG_011': {'G0': 'VMS_L', 'G2': 'VMS_R'},
+    # Intersectional cohort: 027/030 record VMS; 028/029 record DMS (G0/G2).
+    'BG_027': {'G0': 'VMS_L', 'G2': 'VMS_R'},
+    'BG_030': {'G0': 'VMS_L', 'G2': 'VMS_R'},
+    'BG_028': {'G0': 'DMS_L', 'G2': 'DMS_R'},
+    'BG_029': {'G0': 'DMS_L', 'G2': 'DMS_R'},
 }
 
 
@@ -107,6 +112,12 @@ SUBJECT_GENOTYPE = {
     'BG_017': 'D2',
     'BG_018': 'D2',
     'BG_019': 'D2',
+    # Intersectional MOs-recipient cohort (GCaMP6f) — SEPARATE cohort, never
+    # pooled with bulk (see core/cohort.py + excluded_mice). Cell type only.
+    'BG_027': 'D1',
+    'BG_028': 'D1',
+    'BG_029': 'D2',
+    'BG_030': 'D2',
 }
 
 # ── Visualization Defaults ────────────────────────────────────

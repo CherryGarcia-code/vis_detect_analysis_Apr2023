@@ -99,3 +99,36 @@ def summarize_sessions_by_cell(per_session_df, value_cols=("delta", "auroc"),
             row[f"{col}_ci_hi"] = ci["ci_hi"]
         out.append(row)
     return pd.DataFrame(out)
+
+# Bulk subjects without usable photometry data, excluded from cross-cohort
+# matching: BG_014 (staging all-Excluded), BG_015 / BG_017 (absent from photom_data).
+BULK_NO_DATA = {"BG_014", "BG_015", "BG_017"}
+
+RANK_BASED_METRICS = {"auroc", "sign", "rank_biserial_r", "peak_latency", "onset_latency"}
+
+def assert_rank_based(metric_name):
+    """Guard: cross-cohort (6f vs 8m) comparison may use only indicator-invariant
+    quantities. Raises ValueError for magnitude metrics (e.g. signed_auc)."""
+    if metric_name not in RANK_BASED_METRICS:
+        raise ValueError(
+            f"{metric_name!r} is a magnitude metric; cross-indicator comparison "
+            f"is restricted to {sorted(RANK_BASED_METRICS)}")
+
+def match_cohort_cells(genotype, region):
+    """Pair the one intersectional cell with the matched bulk cell(s)
+    (same genotype x region). Region compared on base name (DMS/VMS/VLS)."""
+    from visdetect_photom.analysis.group_utils import get_genotype
+    from visdetect_photom.core.constants import get_roi_region
+
+    def _base_region_of(subject):
+        # subjects here are G0/G2 cells; base region from G0 mapping
+        r = get_roi_region("G0", subject)
+        return r.rsplit("_", 1)[0] if r else None
+
+    def _members(cohort_name):
+        return [s for s in subjects_in(cohort_name)
+                if get_genotype(s) == genotype and _base_region_of(s) == region
+                and s not in BULK_NO_DATA]
+
+    return {"intersectional": _members("intersectional_mos"),
+            "bulk": _members("bulk_8m")}
