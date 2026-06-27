@@ -20,9 +20,13 @@ def test_staging_split_used_when_enough_sessions():
     assert bins["013_0"] == "less" and bins["013_5"] == "more"
 
 def test_date_fallback_when_staging_thin():
-    sessions = [_sess("013", f"013_{i}", f"2023120{i}") for i in range(4)]
-    bins = assign_proficiency_bins(sessions, manifest=None)  # no staging -> date split
-    assert bins["013_0"] == "less" and bins["013_3"] == "more"
+    # No staging -> date split. Needs >= 2*PROF_MIN_SESSIONS to clear the per-bin
+    # floor (see test_suppression_proficiency_floor.py for the floor edge cases).
+    from visdetect_photom.core.constants import PROF_MIN_SESSIONS
+    n = 2 * PROF_MIN_SESSIONS
+    sessions = [_sess("013", f"013_{i}", f"202312{i + 1:02d}") for i in range(n)]
+    bins = assign_proficiency_bins(sessions, manifest=None)
+    assert bins["013_0"] == "less" and bins[f"013_{n - 1}"] == "more"
 
 def test_session_d_prime_empty_is_nan():
     assert np.isnan(session_d_prime(_sess("013", "013_x", "20231205")))

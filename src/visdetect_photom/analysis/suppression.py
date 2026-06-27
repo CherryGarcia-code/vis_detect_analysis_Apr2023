@@ -315,8 +315,9 @@ def assign_proficiency_bins(sessions, manifest=None,
     Per subject: if the staging manifest gives >= min_sessions Learning AND
     >= min_sessions Expert sessions, use Learning='less' / Expert='more' (other
     stages -> None). Otherwise fall back to a within-subject early-vs-late split
-    by session_date (earlier half 'less', later half 'more'; a lone session ->
-    None).
+    by session_date (earlier half 'less', later half 'more'). The fallback also
+    enforces the per-bin floor: it requires >= min_sessions on EACH side of the
+    split (n >= 2*min_sessions), otherwise all of the subject's sessions -> None.
     """
     by_subject = defaultdict(list)
     for s in sessions:
@@ -333,7 +334,7 @@ def assign_proficiency_bins(sessions, manifest=None,
             continue
         ordered = sorted(subj_sessions, key=lambda s: str(s.session_date))
         n = len(ordered)
-        if n < 2:
+        if n < 2 * min_sessions:
             for s in ordered:
                 bins[s.session_id] = None
             continue
