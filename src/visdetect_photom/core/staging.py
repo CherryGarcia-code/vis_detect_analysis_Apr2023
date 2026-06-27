@@ -38,10 +38,17 @@ def get_session_stage(session, manifest) -> str:
 
 
 def excluded_mice(manifest) -> set:
-    """Subjects (BG_0XX) whose every staged session is 'Excluded'."""
+    """Subjects (BG_0XX) to skip in the BULK default analysis.
+
+    Includes (a) subjects whose every staged session is 'Excluded', AND
+    (b) every subject in a non-bulk cohort (e.g. the intersectional
+    MOs-recipient GCaMP6f cohort), which must NEVER be pooled with the bulk
+    GCaMP8m mice. (b) applies even when no manifest is present.
+    """
+    from visdetect_photom.core.cohort import non_bulk_subjects
+    excl = set(non_bulk_subjects())
     if manifest is None or "stage" not in manifest.columns:
-        return set()
-    excl = set()
+        return excl
     for subj, grp in manifest.groupby("subject_id"):
         if (grp["stage"] == "Excluded").all():
             excl.add(_norm_subject(subj))
