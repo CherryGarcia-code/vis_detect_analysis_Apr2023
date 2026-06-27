@@ -276,6 +276,51 @@ def compute_delta_and_auroc(per_trial_df, min_n=MIN_TRIALS_PER_GROUP):
     return pd.DataFrame(out)
 
 
+def compute_session_delta_and_auroc(per_trial_df, min_n=MIN_TRIALS_PER_GROUP):
+    """Per-recording waiting-period summary (one row per recording).
+
+    Like ``compute_delta_and_auroc`` but the unit of analysis is the recording,
+    not the mouse: groups by (subject_id, genotype, region, recording_id).
+    recording_id is the true per-recording key — session_id is only date-granular
+    and would POOL >1 recording on the same calendar day. Each output row carries
+    recording_id (plus session_id for reference), n_lick, n_withhold, delta and
+    auroc, where delta = mean(withhold) - mean(lick) and auroc is the AUROC of the
+    scalar discriminating withhold (positive) from lick. Recordings with < min_n
+    finite scalars in either group are dropped.
+
+    This is the session-unit variant for the n=1-mouse/cell intersectional MOs
+    cohort, where per-mouse pooling collapses the only available within-animal
+    replication.
+
+    Caller must pass a DataFrame already filtered to a single (track, scheme)
+    combination; the groupby keys do not include track/scheme, so mixing them
+    would silently pool scalars from different windows.
+    """
+    if per_trial_df.empty:
+        return pd.DataFrame()
+    df = per_trial_df[per_trial_df["group"].isin(["lick", "withhold"])].copy()
+    df = df[np.isfinite(df["scalar"].astype(float))]
+    out = []
+    for (subj, geno, region, rid), g in df.groupby(
+            ["subject_id", "genotype", "region", "recording_id"]):
+        lick = g[g["group"] == "lick"]["scalar"].to_numpy(dtype=float)
+        wh = g[g["group"] == "withhold"]["scalar"].to_numpy(dtype=float)
+        if lick.size < min_n or wh.size < min_n:
+            continue
+        scores = np.concatenate([wh, lick])
+        labels = np.concatenate([np.ones(wh.size), np.zeros(lick.size)])
+        # session_id is constant within a recording_id (recording_id is finer);
+        # carry it through for reference.
+        sids = g["session_id"].unique()
+        session_id = sids[0] if len(sids) == 1 else None
+        out.append({"subject_id": subj, "genotype": geno, "region": region,
+                    "recording_id": rid, "session_id": session_id,
+                    "n_lick": int(lick.size), "n_withhold": int(wh.size),
+                    "delta": float(np.mean(wh) - np.mean(lick)),
+                    "auroc": auroc_score(scores, labels)})
+    return pd.DataFrame(out)
+
+
 def run_suppression_stats(per_mouse_df):
     """(pushpull_df, auroc_df) over per-mouse values, per region.
 
