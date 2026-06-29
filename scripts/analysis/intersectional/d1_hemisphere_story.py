@@ -11,11 +11,19 @@ impulsive FA licks (a pre-FA "go" signal), strongest in D1·DMS. With
 withhold=positive labelling, AUROC < 0.5 IS this pre-FA go-ramp (the waiting
 signal is higher before licks than before matched withholds).
 
-This figure asks whether that ramp differs by hemisphere (IT+PT ipsi vs
-IT-only contra). The clean contrast is WITHIN-mouse, WITHIN-indicator:
-G0 (ipsi) vs G2 (contra) of the SAME mouse — avoiding the 6f-vs-8m magnitude
-confound. The bulk-8m comparison is RANK-BASED only (AUROC), shown as a
-reference line, never a magnitude overlay.
+HEADLINE RESULT: the AUROC go-ramp. D1·DMS (BG_028) waiting AUROC is well
+below 0.5 (CIs exclude chance) vs bulk-8m D1·DMS ~0.545 (no ramp). AUROC is
+rank-based, so this is robust to fiber strength. This is the cohort's clean,
+proposal-relevant finding (MOs->D1 promotes impulsive action).
+
+HEMISPHERE AMPLITUDE IS *NOT* INTERPRETABLE AS BIOLOGY. The col-1 PETH amplitude
+looks ipsi(G0)-dominant in BG_028, but the across-event control
+(d1_hemisphere_event_control.py) shows BG_028's contra (G2) fiber is uniformly
+weak across change_hit/hit_lick/fa_lick (contra/ipsi ratio 0.06-0.21), while the
+positive control BG_027 has healthy bilateral fibers (ratio ~0.91 all events).
+So BG_028's ipsi>>contra amplitude is a WEAK CONTRA FIBER, not an IT+PT-vs-IT-only
+effect. The anatomical labels (ipsi=IT+PT, contra=IT-only) are kept for
+reference, but amplitude differences must NOT be read as input-class biology.
 
 n=1 mouse/cell: BG_028 (D1·DMS), BG_027 (D1·VMS). BG_029/030 are D2 and
 compromised — NOT included. Session is the within-animal replication unit.
@@ -184,11 +192,11 @@ def build_figure(results, bulk_ref, out_dir):
     fig, axes = plt.subplots(n_rows, 2, figsize=(11, 4.6 * n_rows), squeeze=False)
 
     fig.suptitle(
-        "D1 MOs-recipient SPNs — pre-FA go-ramp by hemisphere\n"
-        "G0 = ipsi (IT+PT recipients)  vs  G2 = contra (IT-only recipients)\n"
-        "n=1 mouse/cell; within-mouse hemisphere contrast; "
-        "bulk = rank-based ref (6f vs 8m, magnitudes NOT compared)",
-        fontsize=11)
+        "D1 MOs-recipient SPNs — pre-FA GO-RAMP (headline = AUROC, col 2)\n"
+        "D1·DMS waiting AUROC <0.5 (pre-FA go-ramp) vs bulk-8m (no ramp); AUROC rank-based → robust to fiber strength\n"
+        "⚠ col-1 AMPLITUDE is fiber-confounded — BG_028 contra (G2) is a WEAK FIBER (see d1_hemisphere_event_control),\n"
+        "    NOT IT+PT-vs-IT-only biology. n=1 mouse/cell; bulk = rank-based ref (6f vs 8m, magnitudes NOT compared)",
+        fontsize=10)
 
     for ri, (mouse, region) in enumerate(D1_MICE):
         res = results[mouse]
@@ -204,7 +212,8 @@ def build_figure(results, bulk_ref, out_dir):
         ax.axhline(0.0, color="0.6", ls=":", lw=0.6)
         ax.set_xlabel("Time from FA lick (s)")
         ax.set_ylabel(r"$\Delta$ z-dF/F (baseline-subtracted)")
-        ax.set_title(f"{mouse} D1·{region} — pre-FA ramp by hemisphere", fontsize=9)
+        ax.set_title(f"{mouse} D1·{region} — pre-FA ramp by hemisphere\n"
+                     "(amplitude fiber-confounded; cf. event-control)", fontsize=8)
         ax.legend(fontsize=7, loc="upper left")
 
         # ── Col 2: waiting-period AUROC bars (withhold vs FA-lick) ──
