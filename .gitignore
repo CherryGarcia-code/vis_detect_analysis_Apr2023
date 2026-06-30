@@ -525,3 +525,5 @@ exported_figures/
 *.7z
 photometry_export_matlab.csv
 photometry_export_check_plot.png
+# Exploration pkl cache (large, regenerable)
+results/explore_cache/
